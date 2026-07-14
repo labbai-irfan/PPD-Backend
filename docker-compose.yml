@@ -1,0 +1,24 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: ppd-mongo
+    restart: unless-stopped
+    ports:
+      - '27018:27017' # host 27018 -> container 27017 (27017 taken by another project)
+    volumes:
+      - mongo-data:/data/db
+
+  mongo-express:
+    image: mongo-express
+    container_name: ppd-mongo-express
+    restart: unless-stopped
+    ports:
+      - '8081:8081'
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://mongo:27017
+      ME_CONFIG_BASICAUTH: 'false'
+    depends_on:
+      - mongo
+
+volumes:
+  mongo-data:
