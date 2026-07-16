@@ -19,16 +19,56 @@ import {
 } from '@nestjs/swagger'
 import { InjectModel } from '@nestjs/mongoose'
 import { Model } from 'mongoose'
-import { IsBoolean, IsNumber, IsOptional, IsString, IsUrl, Min } from 'class-validator'
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Min,
+  ValidateNested,
+} from 'class-validator'
+import { Type } from 'class-transformer'
 
 import { Banner, BannerDocument } from './schemas/banner.schema'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { ParseObjectIdPipe } from '../../common/pipes/parse-object-id.pipe'
 
+export class BannerItemDto {
+  @ApiPropertyOptional({ example: 'Slide 1' })
+  @IsString()
+  @IsOptional()
+  title?: string
+
+  @ApiPropertyOptional({ example: '/uploads/2024/01/slide-1.jpg' })
+  @IsString()
+  @IsOptional()
+  image?: string
+
+  @ApiPropertyOptional({ example: '/products?tag=deal' })
+  @IsString()
+  @IsOptional()
+  href?: string
+}
+
 export class CreateBannerDto {
   @ApiProperty({ example: 'Summer Sale' })
   @IsString()
   title: string
+
+  @ApiPropertyOptional({ example: 'carousel', enum: ['static', 'carousel'] })
+  @IsIn(['static', 'carousel'])
+  @IsOptional()
+  type?: string
+
+  @ApiPropertyOptional({ type: [BannerItemDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BannerItemDto)
+  @IsOptional()
+  items?: BannerItemDto[]
 
   @ApiPropertyOptional({ example: 'Get 50% off on select items' })
   @IsString()

@@ -8,6 +8,14 @@ export class Banner {
   @Prop({ required: true })
   title: string;
 
+  /** 'static' = single-image banner; 'carousel' = multi-slide banner with items[] */
+  @Prop({ default: 'static', enum: ['static', 'carousel'] })
+  type: string;
+
+  /** Carousel slides (used when type === 'carousel') */
+  @Prop({ type: [{ title: String, image: String, href: String }], default: [] })
+  items: { title: string; image: string; href: string }[];
+
   @Prop({ default: '' })
   subtitle: string;
 
