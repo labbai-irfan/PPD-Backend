@@ -11,10 +11,10 @@ export class AdminAuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @Post('login')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Admin portal login (customers rejected)' })
+  @ApiOperation({ summary: 'Admin portal login (customers rejected) — stricter rate limit' })
   login(@Body() dto: LoginDto, @Headers('user-agent') userAgent: string, @Ip() ip: string) {
     return this.authService.adminLogin(dto, { userAgent, ip });
   }

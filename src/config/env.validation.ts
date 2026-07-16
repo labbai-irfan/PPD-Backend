@@ -3,7 +3,7 @@ import * as Joi from 'joi';
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   PORT: Joi.number().default(3000),
-  API_PREFIX: Joi.string().default('api/v1'),
+  API_PREFIX: Joi.string().default('api'),
 
   MONGODB_URI: Joi.string().required(),
 
@@ -38,4 +38,5 @@ export const envValidationSchema = Joi.object({
 
   RAZORPAY_KEY_ID: Joi.string().allow('').optional(),
   RAZORPAY_KEY_SECRET: Joi.string().allow('').optional(),
+  RAZORPAY_WEBHOOK_SECRET: Joi.string().allow('').optional(),
 });

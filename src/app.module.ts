@@ -33,6 +33,7 @@ import { UploadsModule } from './modules/uploads/uploads.module';
 import { CartModule } from './modules/cart/cart.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { BulkImportModule } from './modules/bulk-import/bulk-import.module';
+import { RecommendationsModule } from './modules/recommendations/recommendations.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { BulkImportModule } from './modules/bulk-import/bulk-import.module';
     CartModule,
     AuditModule,
     BulkImportModule,
+    RecommendationsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

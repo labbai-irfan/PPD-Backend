@@ -14,11 +14,7 @@ export class LoggingInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       tap({
-        next: () => {
-          const ms = Date.now() - start;
-          const userId = request.user?.sub ?? 'anon';
-          this.logger.log(`${method} ${url} ${ms}ms [${userId}]`);
-        },
+        // Successful requests are no longer logged to reduce terminal noise
         error: (err: Error & { status?: number }) => {
           const ms = Date.now() - start;
           this.logger.warn(`${method} ${url} ${err.status ?? 500} ${ms}ms - ${err.message}`);

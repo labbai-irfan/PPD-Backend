@@ -93,6 +93,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('reset-password')
   @HttpCode(200)
   @ApiOperation({ summary: 'Reset password using an emailed OTP' })
@@ -111,6 +112,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('verify-otp')
   @HttpCode(200)
   @ApiOperation({ summary: 'Verify a phone OTP' })

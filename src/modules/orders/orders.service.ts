@@ -17,6 +17,7 @@ import {
   STATUS_TRANSITIONS,
 } from './schemas/order.schema';
 import { Product, ProductDocument } from '../products/schemas/product.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 import { Notification, NotificationDocument } from '../notifications/notifications.module';
 import { CouponsService } from '../coupons/coupons.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -41,6 +42,7 @@ export class OrdersService {
   constructor(
     @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
     @InjectModel(Product.name) private readonly productModel: Model<ProductDocument>,
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(Notification.name) private readonly notificationModel: Model<NotificationDocument>,
     private readonly couponsService: CouponsService,
     private readonly paymentsService: PaymentsService,
@@ -184,11 +186,13 @@ export class OrdersService {
         href: `/orders/${order!.orderNumber}`,
       });
 
-      void this.mail.send({
-        to: user.email,
-        subject: `Order ${order!.orderNumber} confirmed — PPD Store`,
-        text: `Hi ${user.name},\n\nYour order ${order!.orderNumber} for ₹${total} has been placed.\nExpected delivery: ${order!.expectedDelivery?.toDateString()}.\n\nThank you for shopping with PPD!`,
-      });
+      void this.mail.sendOrderStatus(
+        user.email,
+        order!.orderNumber,
+        order!.status,
+        total,
+        order!.expectedDelivery
+      );
 
       return order!;
     } catch (err) {
@@ -373,6 +377,19 @@ export class OrdersService {
       kind: 'order',
       href: `/orders/${order.orderNumber}`,
     });
+    
+    // Attempt to fetch user to get their email
+    const user = await this.userModel.findById(order.userId).exec();
+    if (user?.email) {
+      void this.mail.sendOrderStatus(
+        user.email,
+        order.orderNumber,
+        status,
+        order.pricing.total,
+        order.expectedDelivery
+      );
+    }
+    
     return order;
   }
 

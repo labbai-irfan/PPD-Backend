@@ -6,8 +6,15 @@ import {
   HttpCode,
   Patch,
   Post,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname, join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
+import { randomUUID } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { IsEmail, IsOptional, IsString, Matches, MinLength } from 'class-validator';
@@ -15,10 +22,36 @@ import { IsEmail, IsOptional, IsString, Matches, MinLength } from 'class-validat
 import { UsersService } from './users.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
+const UPLOAD_ROOT = process.env.UPLOAD_DIR ?? './uploads';
+const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
+
+const storage = diskStorage({
+  destination: (_req, _file, cb) => {
+    const now = new Date();
+    const dir = join(UPLOAD_ROOT, String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, '0'));
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req, file, cb) => cb(null, `${randomUUID()}${extname(file.originalname).toLowerCase()}`),
+});
+
+const imageUpload = FileInterceptor('file', {
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED.includes(file.mimetype)) {
+      return cb(new BadRequestException('Only JPG, PNG or WebP images are allowed'), false);
+    }
+    cb(null, true);
+  },
+});
+
+const toUrl = (path: string) => '/' + path.replace(/\\/g, '/').replace(/^\.?\/?/, '');
+
 class UpdateProfileDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MinLength(2) name?: string;
   @ApiPropertyOptional() @IsOptional() @IsEmail() email?: string;
-  @ApiPropertyOptional() @IsOptional() @Matches(/^[6-9]\d{9}$/, { message: 'phone must be a valid 10-digit Indian mobile' }) phone?: string;
+  @ApiPropertyOptional() @IsOptional() @Matches(/^\d{10}$/, { message: 'phone must be a valid 10-digit mobile' }) phone?: string;
 }
 
 class ChangePasswordDto {
@@ -65,5 +98,17 @@ export class MeController {
     user.passwordHash = await bcrypt.hash(dto.newPassword, rounds);
     await user.save();
     return { message: 'Password updated' };
+  }
+
+  @Post('avatar')
+  @UseInterceptors(imageUpload)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } })
+  @ApiOperation({ summary: 'Upload my avatar (jpg/png/webp, ≤5 MB) → updated user' })
+  async uploadAvatar(@CurrentUser('sub') userId: string, @UploadedFile() file?: Express.Multer.File) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const user = await this.usersService.findByIdOrFail(userId);
+    user.avatar = toUrl(file.path);
+    return user.save();
   }
 }

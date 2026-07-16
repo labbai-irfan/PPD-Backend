@@ -45,7 +45,7 @@ export class OrderAddressDto {
   name: string;
 
   @ApiProperty()
-  @Matches(/^[6-9]\d{9}$/, { message: 'phone must be a valid 10-digit Indian mobile' })
+  @Matches(/^\d{10}$/, { message: 'phone must be a valid 10-digit mobile' })
   phone: string;
 
   @ApiProperty()

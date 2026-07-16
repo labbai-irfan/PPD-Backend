@@ -11,7 +11,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { createHmac, randomInt } from 'node:crypto';
+import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 
 import {
   PaymentIntent,
@@ -19,7 +19,9 @@ import {
   PaymentProvider,
 } from './schemas/payment-intent.schema';
 import { Product, ProductDocument } from '../products/schemas/product.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 import { CouponsService } from '../coupons/coupons.service';
+import { MailService } from '../mail/mail.service';
 import { ConfirmMockDto, CreateIntentDto, VerifyPaymentDto } from './dto/payment.dto';
 
 const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -37,6 +39,27 @@ const generatePaymentId = (): string => `PAY-${randomAlnum(10)}`;
 const generateTransactionId = (): string => `TXN-${randomAlnum(12)}`;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Constant-time signature comparison — string !== leaks length/prefix timing. */
+const safeEqual = (a: string, b: string): boolean => {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+};
+
+/** The slice of a Razorpay webhook event we act on. */
+interface RazorpayWebhookEvent {
+  event?: string;
+  payload?: {
+    payment?: {
+      entity?: {
+        id?: string;
+        order_id?: string;
+        error_description?: string | null;
+      };
+    };
+  };
+}
 
 export interface IntentResponse {
   intentId: string;
@@ -61,8 +84,10 @@ export class PaymentsService {
     @InjectModel(PaymentIntent.name)
     private readonly paymentIntentModel: Model<PaymentIntentDocument>,
     @InjectModel(Product.name) private readonly productModel: Model<ProductDocument>,
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     private readonly couponsService: CouponsService,
     private readonly config: ConfigService,
+    private readonly mail: MailService,
   ) {}
 
   // ---------- Provider strategy ----------
@@ -256,7 +281,7 @@ export class PaymentsService {
       .update(`${dto.razorpayOrderId}|${dto.razorpayPaymentId}`)
       .digest('hex');
 
-    if (expected !== dto.razorpaySignature) {
+    if (!safeEqual(expected, dto.razorpaySignature)) {
       intent.status = 'failed';
       intent.failReason = 'Payment signature verification failed';
       await intent.save();
@@ -269,6 +294,68 @@ export class PaymentsService {
     await intent.save();
 
     return { intentId: intent.intentId, status: 'paid', transactionId: intent.transactionId };
+  }
+
+  // ---------- Razorpay webhook ----------
+
+  /**
+   * Safety net for payments that complete without the browser reporting back
+   * (tab closed mid-payment, network drop after the gateway charged).
+   * Signature is an HMAC-SHA256 of the raw request bytes with the webhook secret.
+   * Idempotent with client-side verify: whichever lands first marks the intent
+   * paid with the same transactionId, and the other becomes a no-op.
+   */
+  async handleRazorpayWebhook(
+    rawBody: Buffer | undefined,
+    signature: string | undefined,
+  ): Promise<{ received: boolean }> {
+    const secret = this.config.get<string>('payments.razorpayWebhookSecret') ?? '';
+    if (!secret) {
+      // Without a secret we cannot authenticate the caller — refuse loudly.
+      throw new BadRequestException('Webhook is not configured');
+    }
+    if (!rawBody?.length || !signature) {
+      throw new BadRequestException('Missing webhook signature');
+    }
+
+    const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
+    if (!safeEqual(expected, signature)) {
+      this.logger.warn('Razorpay webhook rejected: bad signature');
+      throw new BadRequestException('Invalid webhook signature');
+    }
+
+    let event: RazorpayWebhookEvent;
+    try {
+      event = JSON.parse(rawBody.toString('utf8')) as RazorpayWebhookEvent;
+    } catch {
+      throw new BadRequestException('Invalid webhook payload');
+    }
+
+    const payment = event.payload?.payment?.entity;
+    if (!payment?.order_id) return { received: true };
+
+    const intent = await this.paymentIntentModel.findOne({ providerOrderId: payment.order_id }).exec();
+    if (!intent) return { received: true }; // not an intent of this environment
+
+    if (event.event === 'payment.captured' && intent.status === 'created') {
+      intent.status = 'paid';
+      intent.paidAt = new Date();
+      intent.transactionId = payment.id ?? '';
+      await intent.save();
+      this.logger.log(`Webhook marked ${intent.intentId} paid (${payment.id ?? 'unknown payment id'})`);
+      
+      const user = await this.userModel.findById(intent.userId).exec();
+      if (user?.email) {
+        void this.mail.sendPaymentSuccess(user.email, intent.amount, intent.transactionId);
+      }
+    } else if (event.event === 'payment.failed' && intent.status === 'created') {
+      intent.status = 'failed';
+      intent.failReason = payment.error_description || 'Payment failed at the gateway';
+      await intent.save();
+      this.logger.log(`Webhook marked ${intent.intentId} failed`);
+    }
+
+    return { received: true };
   }
 
   // ---------- Order integration ----------

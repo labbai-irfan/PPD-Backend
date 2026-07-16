@@ -9,9 +9,11 @@ import {
 import { Request, Response } from 'express';
 
 /**
- * Unified error envelope:
- * { statusCode, error, message, path, timestamp }
- * class-validator errors arrive as message: string[]
+ * Unified error envelope with security hardening:
+ * - Never leak stack traces or database errors to clients
+ * - Log detailed errors internally for debugging
+ * - Return generic messages in production
+ * - Include request ID for error tracking
  */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -21,6 +23,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
+    const nodeEnv = process.env.NODE_ENV ?? 'development';
+    const requestId = (request as any).id || Date.now().toString();
 
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let error = 'Internal Server Error';
@@ -38,15 +42,33 @@ export class AllExceptionsFilter implements ExceptionFilter {
         error = (b.error as string) ?? exception.name;
       }
     } else if (exception instanceof Error) {
-      message = exception.message;
-      this.logger.error(exception.message, exception.stack);
+      // Log detailed error internally
+      this.logger.error(`[${requestId}] ${exception.message}`, exception.stack);
+      // Don't expose error message to client in production
+      if (nodeEnv === 'production') {
+        message = 'An unexpected error occurred';
+      } else {
+        message = exception.message;
+      }
     }
+
+    // Sanitize: remove MongoDB/database-specific errors from response
+    if (typeof message === 'string') {
+      if (message.includes('MongoError') || message.includes('$') || message.includes('ObjectId')) {
+        this.logger.warn(`[${requestId}] Database error exposed: ${message}`);
+        message = nodeEnv === 'production' ? 'An error occurred' : message;
+      }
+    }
+
+    // Never expose sensitive paths or internal structure
+    const safeUrl = request.url.split('?')[0]; // Remove query params that might contain tokens
 
     response.status(statusCode).json({
       statusCode,
       error,
       message,
-      path: request.url,
+      requestId, // For support/debugging
+      ...(nodeEnv !== 'production' && { path: safeUrl }), // Don't expose paths in production
       timestamp: new Date().toISOString(),
     });
   }

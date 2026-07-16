@@ -1,7 +1,7 @@
 export default () => ({
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: parseInt(process.env.PORT ?? '3000', 10),
-  apiPrefix: process.env.API_PREFIX ?? 'api/v1',
+  apiPrefix: process.env.API_PREFIX ?? 'api',
 
   mongodbUri: process.env.MONGODB_URI ?? 'mongodb://localhost:27017/ppd-store',
 
@@ -50,5 +50,6 @@ export default () => ({
   payments: {
     razorpayKeyId: process.env.RAZORPAY_KEY_ID ?? '',
     razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET ?? '',
+    razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET ?? '',
   },
 });

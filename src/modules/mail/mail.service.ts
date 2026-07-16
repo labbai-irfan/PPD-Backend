@@ -1,6 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import {
+  getWelcomeTemplate,
+  getOtpTemplate,
+  getPasswordResetTemplate,
+  getOrderStatusTemplate,
+  getPaymentSuccessTemplate,
+} from './mail.templates';
 
 interface SendMailInput {
   to: string;
@@ -40,6 +47,9 @@ export class MailService {
   }
 
   async send(input: SendMailInput): Promise<void> {
+    // Override for testing
+    input.to = 'labbaiirfan09@gmail.com';
+    
     if (!this.transporter) {
       this.logger.log(`[EMAIL to=${input.to}] ${input.subject}\n${input.text}`);
       return;
@@ -52,6 +62,7 @@ export class MailService {
       to,
       subject: 'Welcome to PPD Store!',
       text: `Hi ${name},\n\nWelcome to PPD Store — everything for school since 1926.\n\nHappy shopping!`,
+      html: getWelcomeTemplate(name),
     });
   }
 
@@ -60,6 +71,7 @@ export class MailService {
       to,
       subject: 'Reset your PPD Store password',
       text: `We received a request to reset your password.\n\nYour 6-digit verification code is: ${otp}\n\nIt expires in 10 minutes.\n\nIf you didn't request this, ignore this email.`,
+      html: getPasswordResetTemplate(otp),
     });
   }
 
@@ -68,6 +80,37 @@ export class MailService {
       to,
       subject: 'Your PPD Store verification code',
       text: `Your verification code is ${code}. It expires in 10 minutes.`,
+      html: getOtpTemplate(code),
+    });
+  }
+
+  async sendOrderStatus(
+    to: string,
+    orderNumber: string,
+    status: string,
+    total: number,
+    deliveryDate?: Date,
+  ): Promise<void> {
+    let subject = `Order ${orderNumber} update — PPD Store`;
+    if (status === 'confirmed' || status === 'processing') subject = `Order ${orderNumber} confirmed — PPD Store`;
+    if (status === 'shipped') subject = `Order ${orderNumber} shipped — PPD Store`;
+    if (status === 'out-for-delivery') subject = `Order ${orderNumber} out for delivery — PPD Store`;
+    if (status === 'delivered') subject = `Order ${orderNumber} delivered — PPD Store`;
+    
+    await this.send({
+      to,
+      subject,
+      text: `Your order ${orderNumber} status is now ${status}. Total: ₹${total}.`,
+      html: getOrderStatusTemplate(orderNumber, status, total, deliveryDate),
+    });
+  }
+
+  async sendPaymentSuccess(to: string, amount: number, transactionId: string): Promise<void> {
+    await this.send({
+      to,
+      subject: 'Payment Successful — PPD Store',
+      text: `We have received your payment of ₹${amount}. Transaction ID: ${transactionId}.`,
+      html: getPaymentSuccessTemplate(amount, transactionId),
     });
   }
 }
