@@ -12,6 +12,10 @@ export class Banner {
   @Prop({ default: 'static', enum: ['static', 'carousel'] })
   type: string;
 
+  /** Where the banner renders: 'hero' = home top carousel; 'bundle' = Build-Your-Bundle band */
+  @Prop({ default: 'hero', enum: ['hero', 'bundle'] })
+  placement: string;
+
   /** Carousel slides (used when type === 'carousel') */
   @Prop({ type: [{ title: String, image: String, href: String }], default: [] })
   items: { title: string; image: string; href: string }[];

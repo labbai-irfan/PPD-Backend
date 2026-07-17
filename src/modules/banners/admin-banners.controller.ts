@@ -63,6 +63,11 @@ export class CreateBannerDto {
   @IsOptional()
   type?: string
 
+  @ApiPropertyOptional({ example: 'hero', enum: ['hero', 'bundle'] })
+  @IsIn(['hero', 'bundle'])
+  @IsOptional()
+  placement?: string
+
   @ApiPropertyOptional({ type: [BannerItemDto] })
   @IsArray()
   @ValidateNested({ each: true })
