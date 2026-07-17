@@ -360,6 +360,17 @@ export const seedBanners = [
     sortOrder: 3,
     isActive: true,
   },
+  {
+    title: 'Build Your Bundle & Save More!',
+    subtitle: 'Pick your favourite stationery items and get up to 30% OFF',
+    cta: 'Build Bundle',
+    href: '/products/all?category=stationery',
+    image: '/components/carousel2.png',
+    tone: 'bg-grad-hero',
+    sortOrder: 0,
+    isActive: true,
+    placement: 'bundle',
+  },
 ];
 
 const img = (seed: string, w = 300, h = 300) => `https://picsum.photos/seed/${seed}/${w}/${h}`;
