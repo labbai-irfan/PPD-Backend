@@ -4,8 +4,12 @@ node_modules/
 # build output
 dist/
 
-# environment
+# environment - NEVER commit credentials!
 .env
+.env.local
+.env.*.local
+.env.production
+.env.development
 
 # uploads (local image storage)
 uploads/

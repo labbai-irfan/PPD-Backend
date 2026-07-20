@@ -47,11 +47,8 @@ export class MailService {
   }
 
   async send(input: SendMailInput): Promise<void> {
-    // Override for testing
-    input.to = 'labbaiirfan09@gmail.com';
-    
     if (!this.transporter) {
-      this.logger.log(`[EMAIL to=${input.to}] ${input.subject}\n${input.text}`);
+      this.logger.log(`[EMAIL to=${input.to}] ${input.subject}`);
       return;
     }
     await this.transporter.sendMail({ from: this.from, ...input });

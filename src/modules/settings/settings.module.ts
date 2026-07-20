@@ -24,6 +24,11 @@ export class Settings {
   @Prop({ default: false }) maintenanceMode: boolean;
   @Prop({ default: 499 }) freeShippingThreshold: number;
   @Prop({ default: 40 }) shippingFee: number;
+  @Prop({ default: '' }) seoTitle: string;
+  @Prop({ default: '' }) seoDescription: string;
+  @Prop({ default: '' }) seoKeywords: string;
+  @Prop({ default: '' }) facebookUrl: string;
+  @Prop({ default: '' }) instagramUrl: string;
 }
 
 export const SettingsSchema = SchemaFactory.createForClass(Settings);
@@ -43,6 +48,11 @@ class UpdateSettingsDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() maintenanceMode?: boolean;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() @Min(0) freeShippingThreshold?: number;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() @Min(0) shippingFee?: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() seoTitle?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() seoDescription?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() seoKeywords?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() facebookUrl?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() instagramUrl?: string;
 }
 
 // ---------- Controller ----------

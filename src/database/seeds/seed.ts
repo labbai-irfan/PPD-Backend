@@ -74,14 +74,14 @@ async function seed() {
       {
         email: 'admin@ppdstore.com',
         name: 'PPD Admin',
-        password: 'admin123',
+        password: process.env.SEED_ADMIN_PASSWORD || 'ChangeMe123!@#',
         role: 'super_admin' as const,
         isProtected: true,
       },
       {
         email: 'demo@example.com',
         name: 'Demo User',
-        password: 'demo123',
+        password: process.env.SEED_DEMO_PASSWORD || 'ChangeMe123!@#',
         role: 'customer' as const,
         isProtected: false,
       },

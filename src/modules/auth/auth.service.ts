@@ -337,11 +337,9 @@ export class AuthService {
       lastSentAt: new Date(),
     });
 
-    // No SMS provider wired yet — log the code ONLY in non-production so a
-    // developer can test the flow. Never log OTP codes in production.
-    if ((process.env.NODE_ENV ?? 'development') !== 'production') {
-      this.logger.debug(`[OTP] phone=${phone} code=${code}`);
-    }
+    // Note: SMS provider not wired yet. In development, use a test phone
+    // that returns predictable OTPs, or use the /test endpoint if available.
+    // NEVER log OTP codes to console, logs, or anywhere — they're like passwords.
 
     return { sentAt: new Date().toISOString(), resendAfter: cooldown };
   }
