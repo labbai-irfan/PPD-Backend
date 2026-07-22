@@ -1,6 +1,6 @@
 import { Body, Controller, HttpCode, Headers, Ip, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Throttle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { ForgotPasswordDto, LoginDto } from './dto/auth.dto';
@@ -11,7 +11,7 @@ export class AdminAuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
-  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @Throttle({ default: { limit: 6, ttl: 60_000 } })
   @Post('login')
   @HttpCode(200)
   @ApiOperation({ summary: 'Admin portal login (customers rejected) — stricter rate limit' })
@@ -20,7 +20,7 @@ export class AdminAuthController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @SkipThrottle()
   @Post('forgot-password')
   @HttpCode(200)
   @ApiOperation({ summary: 'Admin password reset email (always 200)' })

@@ -28,3 +28,6 @@ Thumbs.db
 
 # test coverage
 coverage/
+
+# ad-hoc dev scripts (not part of the app)
+test-emails.ts
