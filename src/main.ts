@@ -51,6 +51,15 @@ async function bootstrap() {
 
   app.setGlobalPrefix(apiPrefix);
 
+  // Behind Nginx (Internet → Nginx → NestJS): trust the single proxy hop so
+  // req.ip, @Ip() and the rate limiters/ThrottlerGuard see the real client IP
+  // from X-Forwarded-For, not Nginx's. A fixed hop count (1) — never `true` —
+  // so clients can't spoof X-Forwarded-For to dodge rate limiting. Only in
+  // deployed envs, where the proxy actually exists; direct-connect dev stays safe.
+  if (nodeEnv !== 'development') {
+    app.set('trust proxy', 1);
+  }
+
   // Cap request body size to blunt payload-based DoS
   app.useBodyParser('json', { limit: '1mb' });
   app.useBodyParser('urlencoded', { limit: '1mb', extended: true });

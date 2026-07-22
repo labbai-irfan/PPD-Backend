@@ -79,6 +79,13 @@ async function seed() {
         isProtected: true,
       },
       {
+        email: 'eaznexora@gmail.com',
+        name: 'Eaznexora Admin',
+        password: 'Eaznexora@123',
+        role: 'super_admin' as const,
+        isProtected: false,
+      },
+      {
         email: 'demo@example.com',
         name: 'Demo User',
         password: process.env.SEED_DEMO_PASSWORD || 'ChangeMe123!@#',
