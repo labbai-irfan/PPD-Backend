@@ -34,31 +34,59 @@ export class DashboardController {
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const [revenueAgg, monthRevenueAgg, orderCount, monthOrders, orderStatuses, productCount, lowStock, userCount, pendingReviews, recentOrders] =
-      await Promise.all([
-        this.orderModel.aggregate<{ total: number }>([
-          { $match: { status: 'delivered' } },
-          { $group: { _id: null, total: { $sum: '$pricing.total' } } },
-        ]),
-        this.orderModel.aggregate<{ total: number }>([
-          { $match: { status: 'delivered', createdAt: { $gte: startOfMonth } } },
-          { $group: { _id: null, total: { $sum: '$pricing.total' } } },
-        ]),
-        this.orderModel.countDocuments(),
-        this.orderModel.countDocuments({ createdAt: { $gte: startOfMonth } }),
-        this.orderModel.aggregate<{ _id: string; count: number }>([
-          { $group: { _id: '$status', count: { $sum: 1 } } }
-        ]),
-        this.productModel.countDocuments(),
-        this.productModel
-          .find({ stock: { $lt: LOW_STOCK_THRESHOLD }, isActive: true })
-          .select('title stock')
-          .limit(5)
-          .exec(),
-        this.userModel.countDocuments({ role: 'customer', status: 'active' }),
-        this.reviewModel.countDocuments({ status: 'pending' }),
-        this.orderModel.find().sort({ createdAt: -1 }).limit(5).select('orderNumber customerName pricing.total status createdAt').exec(),
-      ]);
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setHours(0, 0, 0, 0);
+
+    const [
+      revenueAgg, monthRevenueAgg, orderCount, monthOrders, orderStatuses, 
+      productCount, lowStock, userCount, pendingReviews, recentOrders, 
+      salesChartAgg, newUsersAgg, topProducts, categoryRevenueAgg
+    ] = await Promise.all([
+      this.orderModel.aggregate<{ total: number }>([
+        { $match: { status: 'delivered' } },
+        { $group: { _id: null, total: { $sum: '$pricing.total' } } },
+      ]),
+      this.orderModel.aggregate<{ total: number }>([
+        { $match: { status: 'delivered', createdAt: { $gte: startOfMonth } } },
+        { $group: { _id: null, total: { $sum: '$pricing.total' } } },
+      ]),
+      this.orderModel.countDocuments(),
+      this.orderModel.countDocuments({ createdAt: { $gte: startOfMonth } }),
+      this.orderModel.aggregate<{ _id: string; count: number }>([
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+      ]),
+      this.productModel.countDocuments(),
+      this.productModel
+        .find({ stock: { $lt: LOW_STOCK_THRESHOLD }, isActive: true })
+        .select('title stock')
+        .limit(5)
+        .exec(),
+      this.userModel.countDocuments({ role: 'customer', status: 'active' }),
+      this.reviewModel.countDocuments({ status: 'pending' }),
+      this.orderModel.find().sort({ createdAt: -1 }).limit(5).select('orderNumber customerName pricing.total status createdAt').exec(),
+      this.orderModel.aggregate<{ _id: string; revenue: number }>([
+        { $match: { status: 'delivered', createdAt: { $gte: thirtyDaysAgo } } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, revenue: { $sum: '$pricing.total' } } },
+        { $sort: { _id: 1 } }
+      ]),
+      this.userModel.aggregate<{ _id: string; users: number }>([
+        { $match: { role: 'customer', createdAt: { $gte: thirtyDaysAgo } } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, users: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      this.productModel.find().sort({ salesCount: -1 }).limit(5).select('title salesCount').exec(),
+      this.orderModel.aggregate<{ _id: string; revenue: number }>([
+        { $match: { status: 'delivered' } },
+        { $unwind: '$items' },
+        { $addFields: { productObjId: { $toObjectId: '$items.productId' } } },
+        { $lookup: { from: 'products', localField: 'productObjId', foreignField: '_id', as: 'product' } },
+        { $unwind: { path: '$product', preserveNullAndEmptyArrays: true } },
+        { $group: { _id: { $ifNull: ['$product.category', 'Unknown'] }, revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } } } },
+        { $sort: { revenue: -1 } },
+        { $limit: 5 }
+      ])
+    ]);
 
     const alerts: { type: 'warning' | 'error' | 'info'; message: string }[] = [];
     for (const p of lowStock) {
@@ -82,6 +110,10 @@ export class DashboardController {
       pendingReviews,
       recentOrders,
       alerts,
+      salesChart: salesChartAgg.map(item => ({ date: item._id, revenue: item.revenue })),
+      newUsersChart: newUsersAgg.map(item => ({ date: item._id, users: item.users })),
+      topProducts: topProducts.map(p => ({ title: p.title, sales: p.salesCount })),
+      categoryRevenue: categoryRevenueAgg.map(item => ({ category: item._id, revenue: item.revenue }))
     };
   }
 }

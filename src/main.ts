@@ -6,7 +6,35 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import * as express from 'express';
 import { join } from 'path';
+import rateLimit from 'express-rate-limit';
+import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
+
+/**
+ * Strip MongoDB operator keys ($gt, $where, …) and dotted keys from an object,
+ * mutating IN PLACE. We can't use express-mongo-sanitize here because it
+ * reassigns `req.query`, which is a getter-only property in Express 5.
+ */
+function stripMongoOperators(obj: unknown): void {
+  if (!obj || typeof obj !== 'object') return;
+  for (const key of Object.keys(obj as Record<string, unknown>)) {
+    if (key.startsWith('$') || key.includes('.')) {
+      delete (obj as Record<string, unknown>)[key];
+    } else {
+      stripMongoOperators((obj as Record<string, unknown>)[key]);
+    }
+  }
+}
+
+/** NoSQL-injection guard that mutates req.body/query/params without reassigning them. */
+function mongoSanitize() {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    stripMongoOperators(req.body);
+    stripMongoOperators(req.query);
+    stripMongoOperators(req.params);
+    next();
+  };
+}
 
 async function bootstrap() {
   // rawBody: webhook signatures (Razorpay) are HMACs over the exact request bytes
@@ -22,19 +50,54 @@ async function bootstrap() {
   const nodeEnv = config.get<string>('nodeEnv') ?? 'development';
 
   app.setGlobalPrefix(apiPrefix);
-  // Cap request body size to blunt payload-based DoS. useBodyParser is the
-  // NestJS-native way that preserves rawBody (needed for the Razorpay webhook
-  // HMAC) — unlike a bare express.json(), which would consume the raw stream.
-  // Bulk-import uses multipart (multer enforces its own limits).
+
+  // Cap request body size to blunt payload-based DoS
   app.useBodyParser('json', { limit: '1mb' });
   app.useBodyParser('urlencoded', { limit: '1mb', extended: true });
+
+  // Security headers
   app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
-    contentSecurityPolicy: true,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+      },
+    },
     frameguard: { action: 'deny' },
     noSniff: true,
     xssFilter: true,
+    hsts: { maxAge: 31536000, includeSubDomains: true },
   }));
+
+  // Sanitize data against NoSQL injection
+  app.use(mongoSanitize());
+
+  // Rate limiting on auth endpoints
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: 'Too many requests from this IP, please try again later.',
+    standardHeaders: false,
+    legacyHeaders: false,
+  });
+  app.use(limiter);
+
+  // Stricter rate limit for auth endpoints
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5, // 5 attempts per 15 minutes
+    skipSuccessfulRequests: true,
+    message: 'Too many login attempts, please try again later.',
+    standardHeaders: false,
+    legacyHeaders: false,
+  });
+  app.use(`/${apiPrefix}/auth/login`, authLimiter);
+  app.use(`/${apiPrefix}/auth/admin-login`, authLimiter);
+  app.use(`/${apiPrefix}/auth/register`, authLimiter);
+
   // Uploaded images served statically (product photos, avatars) with CORS restrictions
   app.use('/uploads', express.static(join(process.cwd(), 'uploads')));
 
