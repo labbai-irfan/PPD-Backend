@@ -33,6 +33,13 @@ export class AdminProductsController {
     return this.productsService.adminList(query);
   }
 
+  @Get('stats')
+  @Roles('moderator')
+  @ApiOperation({ summary: 'Inventory snapshot for the admin Inventory page' })
+  stats() {
+    return this.productsService.inventoryStats();
+  }
+
   @Post()
   @ApiOperation({ summary: 'Create a product (slug auto-generated)' })
   create(@Body() dto: CreateProductDto) {

@@ -26,6 +26,12 @@ export class User {
   @Prop()
   avatar?: string;
 
+  @Prop({ type: String, enum: ['student', 'parent'], default: 'parent' })
+  accountType: 'student' | 'parent';
+
+  @Prop()
+  grade?: string;
+
   @Prop({ type: String, enum: ['customer', 'moderator', 'admin', 'super_admin'], default: 'customer' })
   role: UserRole;
 

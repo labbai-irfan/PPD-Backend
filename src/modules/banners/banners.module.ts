@@ -10,7 +10,6 @@ import {
 } from './schemas/home-content.schema';
 import { Public } from '../../common/decorators/public.decorator';
 import { AdminBannersController } from './admin-banners.controller';
-import { AdminHomeController } from './admin-home.controller';
 
 @ApiTags('catalog')
 @Public()
@@ -43,7 +42,7 @@ export class BannersController {
       { name: HomeContent.name, schema: HomeContentSchema },
     ]),
   ],
-  controllers: [BannersController, AdminBannersController, AdminHomeController],
+  controllers: [BannersController, AdminBannersController],
   exports: [MongooseModule],
 })
 export class BannersModule {}

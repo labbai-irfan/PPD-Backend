@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsArray, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { PRODUCT_TAGS } from '../schemas/product.schema';
 
@@ -69,6 +69,12 @@ export class ProductQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(PRODUCT_TAGS)
   tag?: string;
+
+  @ApiPropertyOptional({ description: 'Filter to PPD Original products only' })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => (value === undefined ? undefined : value === 'true' || value === true))
+  @IsBoolean()
+  ppdOriginal?: boolean;
 }
 
 export class ProductsByIdsDto {

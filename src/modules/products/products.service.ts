@@ -8,6 +8,7 @@ import { Paginated, paginate } from '../../common/dto/pagination-query.dto';
 import { slugify } from '../../common/utils';
 
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const LOW_STOCK_THRESHOLD = 10;
 
 @Injectable()
 export class ProductsService {
@@ -20,7 +21,14 @@ export class ProductsService {
     const match: Record<string, unknown> = { isActive: true };
 
     if (query.category && query.category !== 'all') match.category = query.category;
-    if (query.tag) match.tags = query.tag;
+    if (query.tag === 'new') {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      match.createdAt = { $gte: sevenDaysAgo };
+    } else if (query.tag) {
+      match.tags = query.tag;
+    }
+    if (query.ppdOriginal) match.isPpdOriginal = true;
     if (query.brands?.length) match.brand = { $in: query.brands };
     if (query.minRating !== undefined) match.rating = { $gte: query.minRating };
     if (query.minPrice !== undefined || query.maxPrice !== undefined) {
@@ -137,6 +145,8 @@ export class ProductsService {
     q?: string;
     status?: 'active' | 'inactive';
     category?: string;
+    stockStatus?: 'in-stock' | 'low' | 'out';
+    sort?: 'newest' | 'name-asc' | 'stock-asc' | 'stock-desc';
     page: number;
     pageSize: number;
   }): Promise<Paginated<ProductDocument>> {
@@ -147,11 +157,23 @@ export class ProductsService {
       const rx = new RegExp(escapeRegex(query.q), 'i');
       filter.$or = [{ title: rx }, { brand: rx }];
     }
+    if (query.stockStatus === 'out') filter.stock = 0;
+    else if (query.stockStatus === 'low') filter.stock = { $gt: 0, $lt: LOW_STOCK_THRESHOLD };
+    else if (query.stockStatus === 'in-stock') filter.stock = { $gte: LOW_STOCK_THRESHOLD };
+
+    const sortSpec: Record<string, 1 | -1> =
+      query.sort === 'name-asc'
+        ? { title: 1 }
+        : query.sort === 'stock-asc'
+          ? { stock: 1 }
+          : query.sort === 'stock-desc'
+            ? { stock: -1 }
+            : { createdAt: -1 };
 
     const [items, total] = await Promise.all([
       this.productModel
         .find(filter)
-        .sort({ createdAt: -1 })
+        .sort(sortSpec)
         .skip((query.page - 1) * query.pageSize)
         .limit(query.pageSize)
         .exec(),
@@ -160,9 +182,23 @@ export class ProductsService {
     return paginate(items, total, query.page, query.pageSize);
   }
 
+  /** Snapshot for the admin Inventory page's stat cards. */
+  async inventoryStats() {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const [total, addedThisMonth] = await Promise.all([
+      this.productModel.countDocuments(),
+      this.productModel.countDocuments({ createdAt: { $gte: startOfMonth } }),
+    ]);
+    return { total, addedThisMonth };
+  }
+
   async adminCreate(data: CreateProductDto): Promise<ProductDocument> {
     const slug = await this.uniqueSlug(slugify(data.title));
-    return this.productModel.create({ ...data, slug });
+    const stock = data.batches?.length ? this.sumBatchQuantity(data.batches) : (data.stock ?? 0);
+    return this.productModel.create({ ...data, slug, stock });
   }
 
   async adminUpdate(id: string, patch: UpdateProductDto): Promise<ProductDocument> {
@@ -174,7 +210,13 @@ export class ProductsService {
       product.slug = await this.uniqueSlug(slugify(patch.title), id);
     }
     Object.assign(product, patch);
+    // Batches are the source of truth for stock whenever they're supplied on this update.
+    if (patch.batches?.length) product.stock = this.sumBatchQuantity(patch.batches);
     return product.save();
+  }
+
+  private sumBatchQuantity(batches: { quantity: number }[]): number {
+    return batches.reduce((sum, b) => sum + b.quantity, 0);
   }
 
   async adminToggle(id: string): Promise<ProductDocument> {

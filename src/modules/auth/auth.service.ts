@@ -75,6 +75,8 @@ export class AuthService {
           passwordHash,
           referralCode: generateReferralCode(),
           referredBy,
+          accountType: dto.accountType || 'parent',
+          grade: dto.accountType === 'student' ? dto.grade : undefined,
         });
       } catch (err: unknown) {
         const isDupCode =

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 
 export type CategoryDocument = HydratedDocument<Category>;
 
@@ -10,6 +10,10 @@ export class Category {
 
   @Prop({ required: true })
   name: string;
+
+  /** Parent category (top-level categories leave this null; subcategories are one level deep). */
+  @Prop({ type: Types.ObjectId, ref: 'Category', default: null })
+  parentId: Types.ObjectId | null;
 
   /** Material Symbols name or emoji. */
   @Prop({ default: 'category' })

@@ -42,6 +42,16 @@ export class RegisterDto {
   @IsString()
   @MaxLength(20)
   referralCode?: string;
+
+  @ApiPropertyOptional({ enum: ['student', 'parent'] })
+  @IsOptional()
+  @IsString()
+  accountType?: 'student' | 'parent';
+
+  @ApiPropertyOptional({ description: 'Grade/Class if account type is student' })
+  @IsOptional()
+  @IsString()
+  grade?: string;
 }
 
 export class LoginDto {

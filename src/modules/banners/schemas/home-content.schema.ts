@@ -10,9 +10,6 @@ export type HomeContentDocument = HydratedDocument<HomeContent>;
  */
 @Schema({ timestamps: true, collection: 'homecontent' })
 export class HomeContent {
-  @Prop({ type: [{ title: String, image: String, href: String }], default: [] })
-  houseCards: { title: string; image: string; href: string }[];
-
   @Prop({ type: [{ label: String, image: String, href: String }], default: [] })
   yogaTiles: { label: string; image: string; href: string }[];
 
@@ -21,12 +18,6 @@ export class HomeContent {
     default: [],
   })
   yogaPromos: { name: string; desc: string; price: number; image: string; productId: string }[];
-
-  @Prop({
-    type: [{ name: String, blurb: String, price: Number, image: String, href: String }],
-    default: [],
-  })
-  packages: { name: string; blurb: string; price: number; image: string; href: string }[];
 
   @Prop({ type: [String], default: [] })
   categoryChips: string[];

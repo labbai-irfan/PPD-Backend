@@ -34,6 +34,7 @@ import { CartModule } from './modules/cart/cart.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { BulkImportModule } from './modules/bulk-import/bulk-import.module';
 import { RecommendationsModule } from './modules/recommendations/recommendations.module';
+import { PackagesModule } from './modules/packages/packages.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { RecommendationsModule } from './modules/recommendations/recommendations
     AuditModule,
     BulkImportModule,
     RecommendationsModule,
+    PackagesModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

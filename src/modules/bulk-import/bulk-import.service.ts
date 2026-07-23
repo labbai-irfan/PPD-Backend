@@ -16,8 +16,19 @@ export interface ProductRow {
   mrp?: number;
   stock?: number;
   description?: string;
+  shortDescription?: string;
+  sku?: string;
+  hsnCode?: string;
   tags?: string;
   highlights?: string;
+  faqs?: string; // JSON stringified array of {question,answer}
+  specs?: string; // JSON stringified array of {label,value}
+  weightPerUnit?: number;
+  weightUnit?: 'kg' | 'g';
+  discountPercent?: number;
+  gstPercent?: number;
+  status?: 'draft' | 'published';
+  isActive?: boolean;
   deliveryDays?: number;
   returnDays?: number;
   isPpdOriginal?: boolean;
@@ -234,14 +245,24 @@ export class BulkImportService {
           mrp: Math.round(Number(row.mrp)),
           stock: Math.round(Number(row.stock)),
           description: row.description?.trim() ?? '',
+          shortDescription: row.shortDescription?.trim() ?? '',
+          sku: row.sku?.trim() ?? '',
+          hsnCode: row.hsnCode?.trim() ?? '',
           images,
           highlights,
           tags: tags as any,
+          faqs: this.parseJsonField(row.faqs) as any,
+          specs: this.parseJsonField(row.specs) as any,
+          weightPerUnit: row.weightPerUnit != null ? Number(row.weightPerUnit) : undefined,
+          weightUnit: row.weightUnit as 'kg' | 'g' ?? 'kg',
+          discountPercent: row.discountPercent != null ? Number(row.discountPercent) : undefined,
+          gstPercent: row.gstPercent != null ? Number(row.gstPercent) : undefined,
+          status: (row.status as any) ?? 'published',
+          isActive: row.isActive ?? true,
           deliveryDays: row.deliveryDays ? Math.round(Number(row.deliveryDays)) : 2,
           returnDays: row.returnDays ? Math.round(Number(row.returnDays)) : 7,
           isPpdOriginal: row.isPpdOriginal ?? false,
           isFreeDelivery: row.isFreeDelivery ?? false,
-          isActive: true,
         };
 
         // Try to find existing product by title+brand
@@ -302,8 +323,19 @@ export class BulkImportService {
       'mrp',
       'stock',
       'description',
+      'shortDescription',
+      'sku',
+      'hsnCode',
       'tags',
       'highlights',
+      'faqs', // JSON string
+      'specs', // JSON string
+      'weightPerUnit',
+      'weightUnit',
+      'discountPercent',
+      'gstPercent',
+      'status',
+      'isActive',
       'deliveryDays',
       'returnDays',
       'isPpdOriginal',
@@ -319,8 +351,19 @@ export class BulkImportService {
         '499',
         '50',
         'Premium steel water bottle for school and office',
+        'Compact, lightweight',
+        'BOTTLE123',
+        '9983',
         'deal,bestseller',
         'Leak-proof;Durable stainless steel;Keeps drinks hot/cold',
+        '[{"question":"Warranty?","answer":"2 years"}]',
+        '[{"label":"Capacity","value":"750ml"}]',
+        '0.25',
+        'kg',
+        '10',
+        '5',
+        'published',
+        'true',
         '2',
         '7',
         'true',
@@ -334,8 +377,19 @@ export class BulkImportService {
         '120',
         '100',
         'High quality notebook with 200 pages',
+        'Compact, A5 size',
+        'NOTEBOOK456',
+        '9984',
         'new,featured',
         'Smooth paper;Hard bound;Great for writing',
+        '[{"question":"Pages?","answer":"200"}]',
+        '[{"label":"Size","value":"A5"}]',
+        '0.15',
+        'kg',
+        '0',
+        '5',
+        'draft',
+        'false',
         '2',
         '7',
         'false',
@@ -383,7 +437,21 @@ export class BulkImportService {
     return name.trim() || null;
   }
 
+  /**
+   * Safely parse a JSON field from CSV. Returns undefined if parsing fails.
+   */
+  private parseJsonField(value?: string): unknown {
+    if (!value) return undefined;
+    try {
+      return JSON.parse(value);
+    } catch {
+      this.logger.warn(`Failed to parse JSON field: ${value}`);
+      return undefined;
+    }
+  }
+
   private generateJobId(): string {
     return `import-${Date.now()}-${Math.random().toString(36).substring(7)}`;
   }
+
 }
