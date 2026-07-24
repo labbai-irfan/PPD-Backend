@@ -64,6 +64,25 @@ async function bootstrap() {
   app.useBodyParser('json', { limit: '1mb' });
   app.useBodyParser('urlencoded', { limit: '1mb', extended: true });
 
+  // CORS must be enabled first, before other middleware that might interfere
+  const corsOptions = nodeEnv === 'production'
+    ? {
+        origin: corsOrigin.split(',').map(o => o.trim()),
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+        maxAge: 86400,
+        optionsSuccessStatus: 200,
+      }
+    : {
+        origin: true,
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+      };
+
+  app.enableCors(corsOptions);
+
   // Security headers
   app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -109,25 +128,6 @@ async function bootstrap() {
 
   // Uploaded images served statically (product photos, avatars) with CORS restrictions
   app.use('/uploads', express.static(join(process.cwd(), 'uploads')));
-
-  // CORS: restrictive by default, only allow configured origin(s)
-  const corsOptions = nodeEnv === 'production'
-    ? {
-        origin: corsOrigin.split(',').map(o => o.trim()),
-        credentials: true,
-        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-        maxAge: 86400,
-        optionsSuccessStatus: 200,
-      }
-    : {
-        origin: true,
-        credentials: true,
-        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
-      };
-
-  app.enableCors(corsOptions);
 
   app.useGlobalPipes(
     new ValidationPipe({
