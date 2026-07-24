@@ -11,6 +11,12 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   canActivate(context: ExecutionContext) {
+    const request = context.switchToHttp().getRequest();
+    const path = request.path || request.url;
+
+    // Skip auth for static uploads and public assets
+    if (path.startsWith('/uploads') || path.startsWith('/api/health')) return true;
+
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),

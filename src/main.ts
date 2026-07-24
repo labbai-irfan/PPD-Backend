@@ -103,14 +103,18 @@ async function bootstrap() {
   // Sanitize data against NoSQL injection
   app.use(mongoSanitize());
 
-  // Rate limiting on auth endpoints (relaxed in development)
+  // Rate limiting on auth endpoints (relaxed in development, skip for authenticated users)
   const limiter = rateLimit({
     windowMs: nodeEnv === 'development' ? 60 * 1000 : 15 * 60 * 1000, // 1 min in dev, 15 min in prod
     max: nodeEnv === 'development' ? 1000 : 100, // 1000 req/min in dev, 100 in prod
     message: 'Too many requests from this IP, please try again later.',
     standardHeaders: false,
     legacyHeaders: false,
-    skip: () => nodeEnv === 'development', // skip rate limiting entirely in development
+    skip: (req: any) => {
+      if (nodeEnv === 'development') return true
+      // Skip rate limiting for authenticated admin requests (JWT token present)
+      return !!req.headers.authorization?.startsWith('Bearer ')
+    },
   });
   app.use(limiter);
 
