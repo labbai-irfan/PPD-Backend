@@ -103,13 +103,14 @@ async function bootstrap() {
   // Sanitize data against NoSQL injection
   app.use(mongoSanitize());
 
-  // Rate limiting on auth endpoints
+  // Rate limiting on auth endpoints (relaxed in development)
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
+    windowMs: nodeEnv === 'development' ? 60 * 1000 : 15 * 60 * 1000, // 1 min in dev, 15 min in prod
+    max: nodeEnv === 'development' ? 1000 : 100, // 1000 req/min in dev, 100 in prod
     message: 'Too many requests from this IP, please try again later.',
     standardHeaders: false,
     legacyHeaders: false,
+    skip: () => nodeEnv === 'development', // skip rate limiting entirely in development
   });
   app.use(limiter);
 
