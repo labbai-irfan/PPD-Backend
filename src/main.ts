@@ -132,7 +132,9 @@ async function bootstrap() {
   app.use(`/${apiPrefix}/auth/register`, authLimiter);
 
   // Uploaded images served statically (product photos, avatars) with CORS restrictions
-  app.use('/uploads', express.static(join(process.cwd(), 'uploads')));
+  const uploadDir = config.get<string>('uploads.dir') ?? './uploads';
+  const resolvedUploadDir = uploadDir.startsWith('/') ? uploadDir : join(process.cwd(), uploadDir);
+  app.use('/uploads', express.static(resolvedUploadDir));
 
   app.useGlobalPipes(
     new ValidationPipe({
