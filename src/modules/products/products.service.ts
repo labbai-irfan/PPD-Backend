@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
-import { Product, ProductDocument } from './schemas/product.schema';
+import { Product, ProductDocument, InventoryLog, ProductBatch } from './schemas/product.schema';
+import { Order, OrderDocument } from '../orders/schemas/order.schema';
 import { ProductQueryDto, SortOption } from './dto/product-query.dto';
-import { CreateProductDto, UpdateProductDto } from './dto/admin-product.dto';
+import { CreateProductDto, UpdateProductDto, BatchDto } from './dto/admin-product.dto';
 import { Paginated, paginate } from '../../common/dto/pagination-query.dto';
 import { slugify } from '../../common/utils';
 
@@ -14,6 +15,8 @@ const LOW_STOCK_THRESHOLD = 10;
 export class ProductsService {
   constructor(
     @InjectModel(Product.name) private readonly productModel: Model<ProductDocument>,
+    @InjectModel(InventoryLog.name) private readonly inventoryLogModel: Model<InventoryLog>,
+    @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
   ) {}
 
   async list(query: ProductQueryDto): Promise<Paginated<unknown>> {
@@ -195,28 +198,177 @@ export class ProductsService {
     return { total, addedThisMonth };
   }
 
+  private processBatches(batches: BatchDto[] | undefined, unitPrice: number): any[] | undefined {
+    if (!batches) return undefined;
+
+    const nameSet = new Set<string>();
+    const qtySet = new Set<number>();
+    const skuSet = new Set<string>();
+
+    return batches.map((b) => {
+      if (b.quantity <= 0) {
+        throw new BadRequestException(`Batch quantity must be greater than 0 (got ${b.quantity} for ${b.name})`);
+      }
+      if (b.sellingPrice < 0) {
+        throw new BadRequestException(`Selling price cannot be negative (got ${b.sellingPrice} for ${b.name})`);
+      }
+      if (nameSet.has(b.name.toLowerCase())) {
+        throw new BadRequestException(`Duplicate batch name is not allowed: ${b.name}`);
+      }
+      if (qtySet.has(b.quantity)) {
+        throw new BadRequestException(`Duplicate batch quantity is not allowed: ${b.quantity}`);
+      }
+      if (skuSet.has(b.sku.toLowerCase())) {
+        throw new BadRequestException(`Duplicate batch SKU is not allowed: ${b.sku}`);
+      }
+      nameSet.add(b.name.toLowerCase());
+      qtySet.add(b.quantity);
+      skuSet.add(b.sku.toLowerCase());
+
+      const calculatedPrice = unitPrice * b.quantity;
+      let sellingPrice = b.sellingPrice;
+
+      if (b.pricingMode === 'auto') {
+        let discountAmount = 0;
+        if (b.discountType === 'percentage' && b.discountValue) {
+          discountAmount = (calculatedPrice * b.discountValue) / 100;
+        } else if (b.discountType === 'fixed' && b.discountValue) {
+          discountAmount = b.discountValue;
+        }
+        sellingPrice = Math.max(0, calculatedPrice - discountAmount);
+      }
+
+      return {
+        _id: b.id && Types.ObjectId.isValid(b.id) ? new Types.ObjectId(b.id) : new Types.ObjectId(),
+        sku: b.sku,
+        name: b.name,
+        quantity: b.quantity,
+        calculatedPrice,
+        discountType: b.discountType ?? 'none',
+        discountValue: b.discountValue ?? 0,
+        sellingPrice,
+        pricingMode: b.pricingMode,
+        displayOrder: b.displayOrder ?? 0,
+        status: b.status ?? 'active',
+        isDefault: b.isDefault ?? false,
+        image: b.image,
+        description: b.description,
+        badge: b.badge ?? 'none',
+        minOrderCount: b.minOrderCount ?? 1,
+        maxOrderCount: b.maxOrderCount ?? 99,
+      };
+    });
+  }
+
   async adminCreate(data: CreateProductDto): Promise<ProductDocument> {
     const slug = await this.uniqueSlug(slugify(data.title));
-    const stock = data.batches?.length ? this.sumBatchQuantity(data.batches) : (data.stock ?? 0);
-    return this.productModel.create({ ...data, slug, stock });
+    const unitPrice = data.unitPrice !== undefined ? data.unitPrice : data.price;
+    const stockQuantity = data.stockQuantity !== undefined ? data.stockQuantity : (data.stock ?? 0);
+
+    if (unitPrice < 0) throw new BadRequestException('Unit price cannot be negative');
+    if (stockQuantity < 0) throw new BadRequestException('Stock quantity cannot be negative');
+
+    const processedBatches = this.processBatches(data.batches, unitPrice);
+
+    const product = await this.productModel.create({
+      ...data,
+      slug,
+      price: unitPrice,
+      unitPrice,
+      stock: stockQuantity,
+      stockQuantity,
+      batches: processedBatches || [],
+    });
+
+    if (stockQuantity > 0) {
+      await this.inventoryLogModel.create({
+        productId: product._id,
+        changeAmount: stockQuantity,
+        action: 'initial',
+        reason: 'Initial stock on product creation',
+        performedBy: 'admin',
+      });
+    }
+
+    return product;
   }
 
   async adminUpdate(id: string, patch: UpdateProductDto): Promise<ProductDocument> {
     const product = await this.productModel.findById(id).exec();
     if (!product) throw new NotFoundException('Product not found');
 
-    // Re-slug only when the title changes
     if (patch.title && patch.title !== product.title) {
       product.slug = await this.uniqueSlug(slugify(patch.title), id);
     }
-    Object.assign(product, patch);
-    // Batches are the source of truth for stock whenever they're supplied on this update.
-    if (patch.batches?.length) product.stock = this.sumBatchQuantity(patch.batches);
-    return product.save();
-  }
 
-  private sumBatchQuantity(batches: { quantity: number }[]): number {
-    return batches.reduce((sum, b) => sum + b.quantity, 0);
+    const oldUnitPrice = product.unitPrice ?? product.price;
+    const oldStock = product.stockQuantity ?? product.stock;
+
+    const unitPrice = patch.unitPrice !== undefined ? patch.unitPrice : (patch.price !== undefined ? patch.price : oldUnitPrice);
+    const stockQuantity = patch.stockQuantity !== undefined ? patch.stockQuantity : (patch.stock !== undefined ? patch.stock : oldStock);
+
+    if (unitPrice < 0) throw new BadRequestException('Unit price cannot be negative');
+    if (stockQuantity < 0) throw new BadRequestException('Stock quantity cannot be negative');
+
+    let processedBatches = patch.batches !== undefined ? this.processBatches(patch.batches, unitPrice) : undefined;
+    if (processedBatches === undefined && unitPrice !== oldUnitPrice) {
+      processedBatches = product.batches.map((b: any) => {
+        const calculatedPrice = unitPrice * b.quantity;
+        let sellingPrice = b.sellingPrice;
+        if (b.pricingMode === 'auto') {
+          let discountAmount = 0;
+          if (b.discountType === 'percentage' && b.discountValue) {
+            discountAmount = (calculatedPrice * b.discountValue) / 100;
+          } else if (b.discountType === 'fixed' && b.discountValue) {
+            discountAmount = b.discountValue;
+          }
+          sellingPrice = Math.max(0, calculatedPrice - discountAmount);
+        }
+        return {
+          ...b.toObject ? b.toObject() : b,
+          calculatedPrice,
+          sellingPrice,
+        };
+      });
+    }
+
+    if (patch.batches !== undefined) {
+      const newBatchIds = new Set(patch.batches.map(b => b.id).filter(Boolean));
+      for (const oldBatch of product.batches) {
+        const oldIdStr = (oldBatch as any)._id?.toString();
+        if (oldIdStr && !newBatchIds.has(oldIdStr)) {
+          const inOrders = await this.orderModel.findOne({ 'items.batchId': oldIdStr }).exec();
+          if (inOrders) {
+            throw new BadRequestException(
+              `Cannot delete batch "${oldBatch.name}" because it was used in Order #${inOrders.orderNumber}. Set its status to "inactive" instead.`
+            );
+          }
+        }
+      }
+    }
+
+    const stockChange = stockQuantity - oldStock;
+    if (stockChange !== 0) {
+      await this.inventoryLogModel.create({
+        productId: product._id,
+        changeAmount: stockChange,
+        action: 'adjustment',
+        reason: patch.stockQuantity !== undefined ? 'Admin manual stock adjustment' : 'Admin manual restock',
+        performedBy: 'admin',
+      });
+    }
+
+    Object.assign(product, patch);
+    
+    product.price = unitPrice;
+    product.unitPrice = unitPrice;
+    product.stock = stockQuantity;
+    product.stockQuantity = stockQuantity;
+    if (processedBatches !== undefined) {
+      product.batches = processedBatches as any;
+    }
+
+    return product.save();
   }
 
   async adminToggle(id: string): Promise<ProductDocument> {
@@ -229,6 +381,16 @@ export class ProductsService {
   async adminDelete(id: string): Promise<void> {
     const result = await this.productModel.deleteOne({ _id: id }).exec();
     if (result.deletedCount === 0) throw new NotFoundException('Product not found');
+  }
+
+  async getInventoryLogs(productId: string): Promise<InventoryLog[]> {
+    if (!Types.ObjectId.isValid(productId)) {
+      throw new BadRequestException('Invalid product ID');
+    }
+    return this.inventoryLogModel
+      .find({ productId: new Types.ObjectId(productId) })
+      .sort({ createdAt: -1 })
+      .exec();
   }
 
   private async uniqueSlug(baseSlug: string, excludeId?: string): Promise<string> {

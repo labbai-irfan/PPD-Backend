@@ -68,6 +68,36 @@ export class OrderItem {
 
   @Prop({ type: Map, of: String, default: {} })
   selections: Map<string, string>;
+
+  @Prop()
+  batchId?: string;
+
+  @Prop()
+  batchSku?: string;
+
+  @Prop()
+  batchName?: string;
+
+  @Prop()
+  unitPrice?: number;
+
+  @Prop()
+  batchQuantity?: number;
+
+  @Prop()
+  batchPrice?: number;
+
+  @Prop()
+  batchCount?: number;
+
+  @Prop()
+  totalUnits?: number;
+
+  @Prop()
+  totalAmount?: number;
+
+  @Prop()
+  pricingMode?: string;
 }
 
 @Schema({ _id: false })
@@ -75,6 +105,7 @@ export class OrderAddress {
   @Prop({ default: '' }) id: string;
   @Prop({ required: true }) name: string;
   @Prop({ required: true }) phone: string;
+  @Prop({ required: true, default: 'India' }) country: string;
   @Prop({ required: true }) line1: string;
   @Prop({ default: '' }) line2: string;
   @Prop({ required: true }) city: string;

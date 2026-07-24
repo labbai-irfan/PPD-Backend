@@ -64,4 +64,11 @@ export class AdminProductsController {
   async remove(@Param('id', ParseObjectIdPipe) id: string) {
     await this.productsService.adminDelete(String(id));
   }
+
+  @Get(':id/logs')
+  @Roles('moderator')
+  @ApiOperation({ summary: 'Get inventory logs for a product' })
+  getLogs(@Param('id', ParseObjectIdPipe) id: string) {
+    return this.productsService.getInventoryLogs(String(id));
+  }
 }

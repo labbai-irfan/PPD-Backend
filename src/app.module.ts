@@ -35,6 +35,8 @@ import { AuditModule } from './modules/audit/audit.module';
 import { BulkImportModule } from './modules/bulk-import/bulk-import.module';
 import { RecommendationsModule } from './modules/recommendations/recommendations.module';
 import { PackagesModule } from './modules/packages/packages.module';
+import { DeliveryChargesModule } from './modules/delivery-charges/delivery-charges.module';
+import { LocationsModule } from './modules/locations/locations.module';
 
 @Module({
   imports: [
@@ -79,6 +81,8 @@ import { PackagesModule } from './modules/packages/packages.module';
     BulkImportModule,
     RecommendationsModule,
     PackagesModule,
+    DeliveryChargesModule,
+    LocationsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

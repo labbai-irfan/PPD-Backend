@@ -21,7 +21,11 @@ export class OrderItemInputDto {
   @IsString()
   productId: string;
 
-  @ApiProperty({ minimum: 1 })
+  @ApiProperty()
+  @IsString()
+  batchId: string;
+
+  @ApiProperty({ minimum: 1, description: 'Number of batches (batchCount)' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -47,6 +51,11 @@ export class OrderAddressDto {
   @ApiProperty()
   @Matches(/^\d{10}$/, { message: 'phone must be a valid 10-digit mobile' })
   phone: string;
+
+  @ApiProperty()
+  @IsString()
+  @MinLength(2)
+  country: string;
 
   @ApiProperty()
   @IsString()

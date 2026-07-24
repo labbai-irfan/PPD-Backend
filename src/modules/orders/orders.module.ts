@@ -9,6 +9,7 @@ import { CouponsModule } from '../coupons/coupons.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { UsersModule } from '../users/users.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { DeliveryChargesModule } from '../delivery-charges/delivery-charges.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     PaymentsModule,
     NotificationsModule,
     forwardRef(() => UsersModule),
+    DeliveryChargesModule,
   ],
   controllers: [OrdersController, AdminOrdersController],
   providers: [OrdersService],

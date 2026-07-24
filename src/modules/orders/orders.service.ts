@@ -16,7 +16,7 @@ import {
   OrderStatus,
   STATUS_TRANSITIONS,
 } from './schemas/order.schema';
-import { Product, ProductDocument } from '../products/schemas/product.schema';
+import { Product, ProductDocument, InventoryLog } from '../products/schemas/product.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { Notification, NotificationDocument } from '../notifications/notifications.module';
 import { CouponsService } from '../coupons/coupons.service';
@@ -26,6 +26,7 @@ import { UsersService } from '../users/users.service';
 import { generateOrderNumber } from '../../common/utils';
 import { Paginated, paginate } from '../../common/dto/pagination-query.dto';
 import { AdminOrderQueryDto, PlaceOrderDto } from './dto/order.dto';
+import { DeliveryChargesService } from '../delivery-charges/delivery-charges.module';
 
 const TRACK_STEPS: { status: OrderStatus; label: string }[] = [
   { status: 'placed', label: 'Order Placed' },
@@ -42,6 +43,7 @@ export class OrdersService {
   constructor(
     @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
     @InjectModel(Product.name) private readonly productModel: Model<ProductDocument>,
+    @InjectModel(InventoryLog.name) private readonly inventoryLogModel: Model<InventoryLog>,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(Notification.name) private readonly notificationModel: Model<NotificationDocument>,
     private readonly couponsService: CouponsService,
@@ -49,50 +51,97 @@ export class OrdersService {
     private readonly usersService: UsersService,
     private readonly config: ConfigService,
     private readonly mail: MailService,
+    private readonly deliveryChargesService: DeliveryChargesService,
   ) {}
 
   // ---------- Place ----------
 
   async place(userId: string, dto: PlaceOrderDto): Promise<OrderDocument> {
-    // Merge duplicate lines for the same product+selections
     const decremented: { productId: Types.ObjectId; quantity: number }[] = [];
+    const inventoryLogsToCreate: { productId: Types.ObjectId; changeAmount: number; action: 'deduction'; reason: string; performedBy: string }[] = [];
 
     try {
-      const snapshots: {
-        product: ProductDocument;
-        quantity: number;
-        selections: Record<string, string>;
-      }[] = [];
+      const orderItemsSnapshot: any[] = [];
+      let subtotal = 0;
 
-      // Guarded decrement: only succeeds when enough stock remains
       for (const item of dto.items) {
         if (!Types.ObjectId.isValid(item.productId)) {
           throw new BadRequestException(`Invalid product id: ${item.productId}`);
         }
-        const product = await this.productModel
-          .findOneAndUpdate(
-            { _id: item.productId, isActive: true, stock: { $gte: item.quantity } },
-            { $inc: { stock: -item.quantity, salesCount: item.quantity } },
-            { new: true },
-          )
-          .exec();
 
-        if (!product) {
-          const exists = await this.productModel.findById(item.productId).select('title stock isActive').exec();
-          const reason = !exists || !exists.isActive
-            ? 'is no longer available'
-            : `has only ${exists.stock} left`;
-          throw new ConflictException(`"${exists?.title ?? 'A product'}" ${reason}`);
+        const product = await this.productModel.findById(item.productId).exec();
+        if (!product || !product.isActive) {
+          throw new ConflictException(`Product "${product?.title ?? 'Unknown'}" is no longer available`);
         }
 
-        decremented.push({ productId: product._id, quantity: item.quantity });
-        snapshots.push({ product, quantity: item.quantity, selections: item.selections ?? {} });
-      }
+        const batch = product.batches.find((b: any) => b._id.toString() === item.batchId);
+        if (!batch) {
+          throw new BadRequestException(`Batch "${item.batchId}" not found on product "${product.title}"`);
+        }
 
-      // Server-side pricing — client prices are never trusted
-      const subtotal = round2(
-        snapshots.reduce((sum, s) => sum + s.product.price * s.quantity, 0),
-      );
+        if (batch.status !== 'active') {
+          throw new BadRequestException(`Batch "${batch.name}" on product "${product.title}" is currently not active`);
+        }
+
+        const batchCount = item.quantity;
+        if (batchCount < batch.minOrderCount || batchCount > batch.maxOrderCount) {
+          throw new BadRequestException(
+            `Requested batch count (${batchCount}) must be between ${batch.minOrderCount} and ${batch.maxOrderCount} for batch "${batch.name}"`
+          );
+        }
+
+        const totalUnits = batch.quantity * batchCount;
+        const currentStock = product.stockQuantity ?? product.stock;
+
+        if (currentStock < totalUnits) {
+          throw new ConflictException(
+            `Product "${product.title}" (Batch: "${batch.name}") has insufficient stock. Required: ${totalUnits} units, Available: ${currentStock} units`
+          );
+        }
+
+        product.stock = currentStock - totalUnits;
+        product.stockQuantity = currentStock - totalUnits;
+        product.salesCount = (product.salesCount ?? 0) + totalUnits;
+
+        await product.save();
+
+        decremented.push({ productId: product._id, quantity: totalUnits });
+
+        const batchPrice = batch.sellingPrice;
+        const totalAmount = batchPrice * batchCount;
+        subtotal += totalAmount;
+
+        orderItemsSnapshot.push({
+          productId: product._id,
+          key: buildKey(product._id.toHexString(), { ...item.selections, batchId: batch._id.toString() }),
+          title: product.title,
+          brand: product.brand,
+          image: batch.image || (product.images && product.images[0]) || '',
+          price: batchPrice,
+          mrp: batch.calculatedPrice,
+          quantity: batchCount,
+          stock: product.stockQuantity,
+          selections: item.selections || {},
+          batchId: batch._id.toString(),
+          batchSku: batch.sku,
+          batchName: batch.name,
+          unitPrice: product.unitPrice ?? product.price,
+          batchQuantity: batch.quantity,
+          batchPrice: batchPrice,
+          batchCount: batchCount,
+          totalUnits: totalUnits,
+          totalAmount: totalAmount,
+          pricingMode: batch.pricingMode,
+        });
+
+        inventoryLogsToCreate.push({
+          productId: product._id,
+          changeAmount: -totalUnits,
+          action: 'deduction',
+          reason: `Deduction for Order pending generation`,
+          performedBy: userId,
+        });
+      }
 
       let discount = 0;
       let couponCode: string | undefined;
@@ -102,12 +151,15 @@ export class OrdersService {
         couponCode = result.coupon.code;
       }
 
-      const threshold = this.config.get<number>('commerce.freeShippingThreshold') ?? 499;
-      const fee = this.config.get<number>('commerce.shippingFee') ?? 40;
-      const shipping = subtotal - discount >= threshold ? 0 : fee;
+      const shipping = await this.deliveryChargesService.calculate({
+        country: dto.address.country,
+        state: dto.address.state,
+        city: dto.address.city,
+        pincode: dto.address.pincode,
+        subtotal: subtotal - discount,
+      });
       const total = round2(subtotal - discount + shipping);
 
-      // Payment: COD stays pending; every online method needs a consumed paid intent
       let payment: Order['payment'];
       if (dto.payment.method === 'cod') {
         payment = {
@@ -136,10 +188,9 @@ export class OrdersService {
         };
       }
 
-      const maxDeliveryDays = Math.max(...snapshots.map((s) => s.product.deliveryDays ?? 2), 1);
+      const maxDeliveryDays = Math.max(...orderItemsSnapshot.map((s) => s.deliveryDays ?? 2), 1);
       const user = await this.usersService.findByIdOrFail(userId);
 
-      // Unique order number with dup-retry
       let order: OrderDocument | null = null;
       for (let attempt = 0; attempt < 5 && !order; attempt++) {
         try {
@@ -147,18 +198,7 @@ export class OrdersService {
             orderNumber: generateOrderNumber(),
             userId: new Types.ObjectId(userId),
             customerName: user.name,
-            items: snapshots.map((s) => ({
-              productId: s.product._id,
-              key: buildKey(s.product._id.toHexString(), s.selections),
-              title: s.product.title,
-              brand: s.product.brand,
-              image: s.product.images[0] ?? '',
-              price: s.product.price,
-              mrp: s.product.mrp,
-              quantity: s.quantity,
-              stock: s.product.stock,
-              selections: s.selections,
-            })),
+            items: orderItemsSnapshot,
             status: 'placed',
             statusHistory: [{ status: 'placed', at: new Date(), location: '', note: 'Order received' }],
             address: { ...dto.address, id: dto.address.id ?? '' },
@@ -170,6 +210,17 @@ export class OrdersService {
           const isDup = typeof err === 'object' && err !== null && (err as { code?: number }).code === 11000;
           if (!isDup || attempt === 4) throw err;
         }
+      }
+
+      // Update and save inventory logs with the generated order number
+      for (const log of inventoryLogsToCreate) {
+        await this.inventoryLogModel.create({
+          productId: log.productId,
+          changeAmount: log.changeAmount,
+          action: log.action,
+          reason: `Order #${order!.orderNumber}`,
+          performedBy: log.performedBy,
+        });
       }
 
       if (payment.intentId) {
@@ -196,10 +247,12 @@ export class OrdersService {
 
       return order!;
     } catch (err) {
-      // Compensate: restore any stock we already took
       for (const d of decremented) {
         await this.productModel
-          .updateOne({ _id: d.productId }, { $inc: { stock: d.quantity, salesCount: -d.quantity } })
+          .updateOne(
+            { _id: d.productId },
+            { $inc: { stock: d.quantity, stockQuantity: d.quantity, salesCount: -d.quantity } }
+          )
           .exec()
           .catch(() => this.logger.error(`Rollback failed for product ${d.productId.toHexString()}`));
       }

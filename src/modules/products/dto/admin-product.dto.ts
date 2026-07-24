@@ -40,17 +40,98 @@ export class SpecDto {
 }
 
 export class BatchDto {
-  @ApiProperty({ example: 100 })
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @ApiProperty()
+  @IsString()
+  sku: string;
+
+  @ApiProperty()
+  @IsString()
+  name: string;
+
+  @ApiProperty({ example: 10 })
   @Type(() => Number)
   @IsNumber()
-  @Min(0)
+  @Min(1)
   quantity: number;
 
-  @ApiProperty({ description: 'Internal cost price for this lot', example: 50 })
+  @ApiPropertyOptional({ example: 500 })
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  costPrice: number;
+  calculatedPrice?: number;
+
+  @ApiPropertyOptional({ enum: ['none', 'percentage', 'fixed'] })
+  @IsOptional()
+  @IsIn(['none', 'percentage', 'fixed'])
+  discountType?: 'none' | 'percentage' | 'fixed';
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  discountValue?: number;
+
+  @ApiProperty({ example: 450 })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  sellingPrice: number;
+
+  @ApiProperty({ enum: ['auto', 'custom'] })
+  @IsIn(['auto', 'custom'])
+  pricingMode: 'auto' | 'custom';
+
+  @ApiPropertyOptional({ example: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  displayOrder?: number;
+
+  @ApiPropertyOptional({ enum: ['active', 'inactive', 'hidden'] })
+  @IsOptional()
+  @IsIn(['active', 'inactive', 'hidden'])
+  status?: 'active' | 'inactive' | 'hidden';
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isDefault?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  image?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional({ enum: ['none', 'popular', 'best-seller', 'recommended', 'most-value', 'limited-offer'] })
+  @IsOptional()
+  @IsIn(['none', 'popular', 'best-seller', 'recommended', 'most-value', 'limited-offer'])
+  badge?: 'none' | 'popular' | 'best-seller' | 'recommended' | 'most-value' | 'limited-offer';
+
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  minOrderCount?: number;
+
+  @ApiPropertyOptional({ example: 99 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  maxOrderCount?: number;
 }
 
 export class CreateProductDto {
@@ -75,18 +156,32 @@ export class CreateProductDto {
   @Min(0)
   price: number;
 
+  @ApiPropertyOptional({ example: 199 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unitPrice?: number;
+
   @ApiProperty({ example: 299 })
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   mrp: number;
 
-  @ApiPropertyOptional({ description: 'Ignored when `batches` is non-empty — derived as their summed quantity' })
+  @ApiPropertyOptional({ description: 'Actual stock quantity of the product' })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   stock?: number;
+
+  @ApiPropertyOptional({ description: 'Actual stock quantity of the product' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  stockQuantity?: number;
 
   @ApiProperty({ minLength: 20 })
   @IsString()

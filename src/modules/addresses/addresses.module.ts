@@ -29,6 +29,7 @@ export class Address {
 
   @Prop({ required: true }) name: string;
   @Prop({ required: true }) phone: string;
+  @Prop({ required: true, default: 'India' }) country: string;
   @Prop({ required: true }) line1: string;
   @Prop({ default: '' }) line2: string;
   @Prop({ required: true }) city: string;
@@ -45,6 +46,7 @@ export const AddressSchema = SchemaFactory.createForClass(Address);
 class CreateAddressDto {
   @ApiProperty() @IsString() @MinLength(2) name: string;
   @ApiProperty() @Matches(/^\d{10}$/, { message: 'phone must be a valid 10-digit mobile' }) phone: string;
+  @ApiProperty() @IsString() @MinLength(2) country: string;
   @ApiProperty() @IsString() @MinLength(3) line1: string;
   @ApiPropertyOptional() @IsOptional() @IsString() line2?: string;
   @ApiProperty() @IsString() @MinLength(2) city: string;

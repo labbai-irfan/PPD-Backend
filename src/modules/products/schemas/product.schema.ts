@@ -28,20 +28,82 @@ export class ProductSpec {
 
 export const ProductSpecSchema = SchemaFactory.createForClass(ProductSpec);
 
-/** A restock lot — quantity received at a given internal cost price. Feeds the product's total `stock`. */
-@Schema({ _id: false })
+import { Types } from 'mongoose';
+
+@Schema({ _id: true, timestamps: true })
 export class ProductBatch {
-  @Prop({ required: true, min: 0 })
+  _id: Types.ObjectId;
+
+  @Prop({ required: true })
+  sku: string;
+
+  @Prop({ required: true })
+  name: string;
+
+  @Prop({ required: true, min: 1 })
   quantity: number;
 
   @Prop({ required: true, min: 0 })
-  costPrice: number;
+  calculatedPrice: number;
 
-  @Prop({ default: Date.now })
-  createdAt: Date;
+  @Prop({ type: String, enum: ['none', 'percentage', 'fixed'], default: 'none' })
+  discountType: 'none' | 'percentage' | 'fixed';
+
+  @Prop({ type: Number, default: 0, min: 0 })
+  discountValue: number;
+
+  @Prop({ required: true, min: 0 })
+  sellingPrice: number;
+
+  @Prop({ type: String, enum: ['auto', 'custom'], default: 'auto' })
+  pricingMode: 'auto' | 'custom';
+
+  @Prop({ type: Number, default: 0 })
+  displayOrder: number;
+
+  @Prop({ type: String, enum: ['active', 'inactive', 'hidden'], default: 'active' })
+  status: 'active' | 'inactive' | 'hidden';
+
+  @Prop({ type: Boolean, default: false })
+  isDefault: boolean;
+
+  @Prop()
+  image?: string;
+
+  @Prop()
+  description?: string;
+
+  @Prop({ type: String, enum: ['none', 'popular', 'best-seller', 'recommended', 'most-value', 'limited-offer'], default: 'none' })
+  badge: 'none' | 'popular' | 'best-seller' | 'recommended' | 'most-value' | 'limited-offer';
+
+  @Prop({ type: Number, default: 1, min: 1 })
+  minOrderCount: number;
+
+  @Prop({ type: Number, default: 99, min: 1 })
+  maxOrderCount: number;
 }
 
 export const ProductBatchSchema = SchemaFactory.createForClass(ProductBatch);
+
+@Schema({ timestamps: true })
+export class InventoryLog {
+  @Prop({ type: Types.ObjectId, ref: 'Product', required: true, index: true })
+  productId: Types.ObjectId;
+
+  @Prop({ required: true })
+  changeAmount: number;
+
+  @Prop({ required: true, enum: ['initial', 'restock', 'deduction', 'cancellation', 'adjustment'] })
+  action: 'initial' | 'restock' | 'deduction' | 'cancellation' | 'adjustment';
+
+  @Prop({ required: true })
+  reason: string;
+
+  @Prop({ default: 'system' })
+  performedBy: string;
+}
+
+export const InventoryLogSchema = SchemaFactory.createForClass(InventoryLog);
 
 @Schema({ _id: false })
 export class VariantValue {
@@ -134,11 +196,17 @@ export class Product {
   @Prop({ required: true, min: 0 })
   price: number;
 
+  @Prop({ min: 0 })
+  unitPrice?: number;
+
   @Prop({ required: true, min: 0 })
   mrp: number;
 
   @Prop({ required: true, min: 0, default: 0 })
   stock: number;
+
+  @Prop({ min: 0, default: 0 })
+  stockQuantity?: number;
 
   @Prop({ default: 0, min: 0, max: 5 })
   rating: number;
