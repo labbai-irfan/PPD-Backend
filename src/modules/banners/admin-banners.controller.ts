@@ -47,6 +47,11 @@ export class BannerItemDto {
   @IsOptional()
   image?: string
 
+  @ApiPropertyOptional({ example: '/uploads/2024/01/slide-1-mobile.jpg' })
+  @IsString()
+  @IsOptional()
+  imageMobile?: string
+
   @ApiPropertyOptional({ example: '/products?tag=deal' })
   @IsString()
   @IsOptional()
@@ -94,6 +99,11 @@ export class CreateBannerDto {
   @IsString()
   @IsOptional()
   image?: string
+
+  @ApiPropertyOptional({ example: '/uploads/2024/01/banner-123-mobile.jpg' })
+  @IsString()
+  @IsOptional()
+  imageMobile?: string
 
   @ApiPropertyOptional({ example: 'bg-gradient-to-r from-orange-400 to-orange-600' })
   @IsString()

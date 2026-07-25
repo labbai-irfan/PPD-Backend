@@ -177,8 +177,8 @@ export class Product {
   @Prop()
   weightPerUnit?: number;
 
-  @Prop({ type: String, enum: ['kg', 'g'], default: 'kg' })
-  weightUnit: 'kg' | 'g';
+  @Prop({ type: String, enum: ['kg', 'g', 'mg', 'ml', 'l', 'pcs', 'pack', 'box', 'set'], default: 'kg' })
+  weightUnit: 'kg' | 'g' | 'mg' | 'ml' | 'l' | 'pcs' | 'pack' | 'box' | 'set';
 
   /** Admin pricing-calculator inputs, kept so re-editing shows the same numbers back. */
   @Prop({ min: 0, max: 100 })
@@ -238,6 +238,24 @@ export class Product {
 
   @Prop({ default: false })
   isFreeDelivery: boolean;
+
+  @Prop()
+  barcode?: string;
+
+  @Prop()
+  manufacturer?: string;
+
+  @Prop()
+  publisher?: string;
+
+  @Prop()
+  video?: string;
+
+  @Prop()
+  metaTitle?: string;
+
+  @Prop()
+  metaDescription?: string;
 
   @Prop()
   freeDeliveryThreshold?: number;

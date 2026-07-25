@@ -17,8 +17,8 @@ export class Banner {
   placement: string;
 
   /** Carousel slides (used when type === 'carousel') */
-  @Prop({ type: [{ title: String, image: String, href: String }], default: [] })
-  items: { title: string; image: string; href: string }[];
+  @Prop({ type: [{ title: String, image: String, imageMobile: String, href: String }], default: [] })
+  items: { title: string; image: string; imageMobile?: string; href: string }[];
 
   @Prop({ default: '' })
   subtitle: string;
@@ -31,6 +31,9 @@ export class Banner {
 
   @Prop({ default: '' })
   image: string;
+
+  @Prop({ default: '' })
+  imageMobile: string;
 
   /** Tailwind gradient classes used by the frontend. */
   @Prop({ default: 'bg-grad-hero' })

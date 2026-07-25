@@ -74,9 +74,17 @@ export class OrdersService {
           throw new ConflictException(`Product "${product?.title ?? 'Unknown'}" is no longer available`);
         }
 
-        const batch = product.batches.find((b: any) => b._id.toString() === item.batchId);
+        let batch: any = null;
+        if (item.batchId) {
+          batch = product.batches.find((b: any) => b._id.toString() === item.batchId);
+        } else {
+          // Fallback: Find default active batch, or first active batch
+          batch = product.batches.find((b: any) => b.isDefault && b.status === 'active') ||
+                  product.batches.find((b: any) => b.status === 'active');
+        }
+
         if (!batch) {
-          throw new BadRequestException(`Batch "${item.batchId}" not found on product "${product.title}"`);
+          throw new BadRequestException(`No active batch found for product "${product.title}"`);
         }
 
         if (batch.status !== 'active') {

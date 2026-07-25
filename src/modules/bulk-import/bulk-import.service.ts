@@ -1,44 +1,61 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import * as XLSX from 'xlsx';
 import * as unzipper from 'unzipper';
 import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { Category, CategoryDocument } from '../categories/schemas/category.schema';
 import { Brand, BrandDocument } from '../brands/schemas/brand.schema';
 import { ProductsService } from '../products/products.service';
+import { slugify } from '../../common/utils';
+import {
+  parseString,
+  parseNumber,
+  parseBoolean,
+  parseArray,
+  parseJson,
+  normalizeWeightUnit,
+} from './bulk-import.utils';
 
 export interface ProductRow {
-  title?: string;
-  brand?: string;
-  category?: string;
-  price?: number;
-  mrp?: number;
-  stock?: number;
-  description?: string;
-  shortDescription?: string;
-  sku?: string;
-  hsnCode?: string;
-  tags?: string;
-  highlights?: string;
-  faqs?: string; // JSON stringified array of {question,answer}
-  specs?: string; // JSON stringified array of {label,value}
-  weightPerUnit?: number;
-  weightUnit?: 'kg' | 'g';
-  discountPercent?: number;
-  gstPercent?: number;
-  status?: 'draft' | 'published';
-  isActive?: boolean;
-  deliveryDays?: number;
-  returnDays?: number;
-  isPpdOriginal?: boolean;
-  isFreeDelivery?: boolean;
+  title?: any;
+  brand?: any;
+  category?: any;
+  price?: any;
+  mrp?: any;
+  stock?: any;
+  description?: any;
+  shortDescription?: any;
+  sku?: any;
+  hsnCode?: any;
+  tags?: any;
+  highlights?: any;
+  faqs?: any;
+  specs?: any;
+  weightPerUnit?: any;
+  weightUnit?: any;
+  discountPercent?: any;
+  gstPercent?: any;
+  status?: any;
+  isActive?: any;
+  deliveryDays?: any;
+  returnDays?: any;
+  isPpdOriginal?: any;
+  isFreeDelivery?: any;
+  images?: any;
+  barcode?: any;
+  manufacturer?: any;
+  publisher?: any;
+  video?: any;
+  metaTitle?: any;
+  metaDescription?: any;
 }
 
 export interface BulkImportResult {
   jobId: string;
   status: 'success' | 'partial' | 'failed';
   timestamp: Date;
+  timeTakenMs?: number;
   summary: {
     totalProducts: number;
     successCount: number;
@@ -46,6 +63,7 @@ export interface BulkImportResult {
     skippedCount: number;
     totalImages: number;
     matchedImages: number;
+    invalidCount: number;
   };
   products: Array<{
     title: string;
@@ -53,9 +71,12 @@ export interface BulkImportResult {
     status: 'created' | 'updated' | 'failed' | 'skipped';
     images: number;
     errors?: string[];
+    warnings?: string[];
   }>;
   warnings: string[];
 }
+
+const ALLOWED_WEIGHT_UNITS = ['kg', 'g', 'mg', 'ml', 'l', 'pcs', 'pack', 'box', 'set'];
 
 @Injectable()
 export class BulkImportService {
@@ -68,9 +89,17 @@ export class BulkImportService {
     private readonly productsService: ProductsService,
   ) {}
 
+  private isValidUrl(str: string): boolean {
+    try {
+      const url = new URL(str);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Extract and organize images from ZIP file
-   * Expects filenames like: ProductName.jpg, ProductName_1.jpg, ProductName_2.jpg
    */
   async extractImagesFromZip(zipBuffer: Buffer): Promise<Map<string, string[]>> {
     const imageMap = new Map<string, string[]>();
@@ -78,30 +107,26 @@ export class BulkImportService {
     try {
       const entries = await unzipper.Open.buffer(zipBuffer);
 
-      // Process each file in the ZIP
       for (const entry of entries.files) {
-        const filename = entry.path.split('/').pop(); // Get filename only
+        const filename = entry.path.split('/').pop();
         if (!filename) continue;
 
-        // Skip non-image files
         if (!this.isImageFile(filename)) continue;
 
-        // Extract image data
         const imageData = await entry.buffer();
         const base64 = `data:${this.getMimeType(filename)};base64,${imageData.toString('base64')}`;
 
-        // Parse filename to get product name
         const productName = this.extractProductNameFromFilename(filename);
         if (!productName) {
           this.logger.warn(`Could not extract product name from: ${filename}`);
           continue;
         }
 
-        // Add to map
-        if (!imageMap.has(productName)) {
-          imageMap.set(productName, []);
+        const normProduct = productName.toLowerCase();
+        if (!imageMap.has(normProduct)) {
+          imageMap.set(normProduct, []);
         }
-        imageMap.get(productName)!.push(base64);
+        imageMap.get(normProduct)!.push(base64);
       }
 
       this.logger.log(`Extracted ${imageMap.size} products with images from ZIP`);
@@ -117,7 +142,7 @@ export class BulkImportService {
    * Parse CSV file
    */
   async parseCsv(csvBuffer: Buffer): Promise<ProductRow[]> {
-    const MAX_ROWS = 10000; // Prevent memory exhaustion from massive CSV files
+    const MAX_ROWS = 10000;
 
     try {
       const workbook = XLSX.read(csvBuffer, { type: 'buffer' });
@@ -148,8 +173,13 @@ export class BulkImportService {
   async importProducts(
     rows: ProductRow[],
     imageMap: Map<string, string[]>,
+    autoCreateBrands = true,
+    autoCreateTags = true,
+    dryRun = false,
   ): Promise<BulkImportResult> {
+    const startTime = Date.now();
     const jobId = this.generateJobId();
+
     const result: BulkImportResult = {
       jobId,
       status: 'success',
@@ -161,140 +191,319 @@ export class BulkImportService {
         skippedCount: 0,
         totalImages: Array.from(imageMap.values()).reduce((sum, imgs) => sum + imgs.length, 0),
         matchedImages: 0,
+        invalidCount: 0,
       },
       products: [],
       warnings: [],
     };
 
-    // Load reference data
+    // Reference mappings for categories & brands
     const categories = await this.categoryModel.find({}).lean().exec();
-    const brands = await this.brandModel.find({}).lean().exec();
-    const categoryMap = new Map(categories.map((c: any) => [c.slug, c._id]));
-    const brandSet = new Set(brands.map((b: any) => b.name));
+    const categoryMap = new Map<string, any>();
+    for (const c of categories) {
+      if (c.slug) categoryMap.set(c.slug.toLowerCase().trim(), c);
+      if (c.name) categoryMap.set(c.name.toLowerCase().trim(), c);
+    }
 
-    // Process each product
+    const brands = await this.brandModel.find({}).lean().exec();
+    const brandMap = new Map<string, any>();
+    for (const b of brands) {
+      if (b.name) brandMap.set(b.name.toLowerCase().trim(), b);
+    }
+
+    // Pre-query SKU/Slug/Title for checking duplicates
+    const skusToCheck = rows.map(r => parseString(r.sku)).filter(Boolean);
+    const titlesToCheck = rows.map(r => parseString(r.title)).filter(Boolean);
+    const slugsToCheck = titlesToCheck.map(t => slugify(t));
+
+    const existingDbProducts = await this.productModel.find({
+      $or: [
+        { sku: { $in: skusToCheck } },
+        { slug: { $in: slugsToCheck } },
+        { title: { $in: titlesToCheck } }
+      ]
+    }).lean().exec();
+
+    const dbSkuMap = new Map<string, any>();
+    const dbSlugMap = new Map<string, any>();
+    const dbTitleBrandMap = new Map<string, any>();
+
+    for (const p of existingDbProducts) {
+      if (p.sku) dbSkuMap.set(p.sku.toLowerCase().trim(), p);
+      if (p.slug) dbSlugMap.set(p.slug.toLowerCase().trim(), p);
+      if (p.title && p.brand) {
+        dbTitleBrandMap.set(`${p.title.toLowerCase().trim()}|${p.brand.toLowerCase().trim()}`, p);
+      }
+    }
+
+    // Checking duplicates within the CSV file itself
+    const seenSKUs = new Map<string, number>();
+    const seenSlugs = new Map<string, number>();
+    const seenTitleBrands = new Map<string, number>();
+
+    const parsedRows: any[] = [];
+    const validationStates: Array<{ errors: string[]; warnings: string[] }> = [];
+
+    // Pass 1: Safe Parsing & Comprehensive Validation
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const productRecord: BulkImportResult['products'][0] = {
-        title: row.title || 'Unknown',
-        brand: row.brand || 'Unknown',
-        status: 'failed',
-        images: 0,
-        errors: [],
+      const rowNum = i + 2;
+      const rowErrors: string[] = [];
+      const rowWarnings: string[] = [];
+
+      // Safe parse fields through the utilities
+      const title = parseString(row.title);
+      const brandInput = parseString(row.brand);
+      const categoryInput = parseString(row.category);
+      const price = parseNumber(row.price);
+      const mrp = parseNumber(row.mrp);
+      const stock = parseNumber(row.stock);
+      const sku = parseString(row.sku);
+      const hsnCode = parseString(row.hsnCode);
+      const weightPerUnit = row.weightPerUnit != null ? parseNumber(row.weightPerUnit) : undefined;
+      const weightUnitInput = normalizeWeightUnit(row.weightUnit || 'kg');
+
+      // Metadata optional fields
+      const barcode = parseString(row.barcode);
+      const manufacturer = parseString(row.manufacturer);
+      const publisher = parseString(row.publisher);
+      const video = parseString(row.video);
+      const metaTitle = parseString(row.metaTitle);
+      const metaDescription = parseString(row.metaDescription);
+
+      // Validate required fields
+      if (!title) {
+        rowErrors.push(`Row: ${rowNum} | Product: "${title || 'Unknown'}" | Field: title | Value: "${row.title}" | Reason: Product Title is required.`);
+      }
+      if (!brandInput) {
+        rowErrors.push(`Row: ${rowNum} | Product: "${title || 'Unknown'}" | Field: brand | Value: "${row.brand}" | Reason: Brand is required.`);
+      }
+      if (!categoryInput) {
+        rowErrors.push(`Row: ${rowNum} | Product: "${title || 'Unknown'}" | Field: category | Value: "${row.category}" | Reason: Category is required.`);
+      }
+      if (row.price == null || row.price === '') {
+        rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: price | Value: "${row.price}" | Reason: Price is required.`);
+      } else if (price < 0) {
+        rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: price | Value: "${row.price}" | Reason: Price must be a positive number.`);
+      }
+      if (row.mrp == null || row.mrp === '') {
+        rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: mrp | Value: "${row.mrp}" | Reason: MRP is required.`);
+      } else if (mrp < 0) {
+        rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: mrp | Value: "${row.mrp}" | Reason: MRP must be a positive number.`);
+      }
+      if (price > mrp) {
+        rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: price | Value: "${price}" | Reason: Price cannot be greater than MRP.`);
+      }
+      if (row.stock == null || row.stock === '') {
+        rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: stock | Value: "${row.stock}" | Reason: Stock count is required.`);
+      } else if (stock < 0) {
+        rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: stock | Value: "${row.stock}" | Reason: Stock count must be a non-negative number.`);
+      }
+
+      // Weight unit validation
+      if (row.weightUnit && !ALLOWED_WEIGHT_UNITS.includes(weightUnitInput)) {
+        rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: weightUnit | Value: "${row.weightUnit}" | Reason: Weight Unit must be one of: ${ALLOWED_WEIGHT_UNITS.join(', ')}`);
+      }
+
+      // Category matching slug or name case-insensitively
+      let categorySlug = '';
+      if (categoryInput) {
+        const matchedCat = categoryMap.get(categoryInput.toLowerCase());
+        if (matchedCat) {
+          categorySlug = matchedCat.slug;
+        } else {
+          rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: category | Value: "${categoryInput}" | Reason: Category "${categoryInput}" doesn't exist. Please create it first or select an existing category.`);
+        }
+      }
+
+      // Brand matching case-insensitively
+      let matchedBrandName = brandInput;
+      if (brandInput) {
+        const matchedBrand = brandMap.get(brandInput.toLowerCase());
+        if (matchedBrand) {
+          matchedBrandName = matchedBrand.name;
+        } else if (!autoCreateBrands) {
+          rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: brand | Value: "${brandInput}" | Reason: Brand "${brandInput}" doesn't exist. Please enable auto-create or select an existing brand.`);
+        }
+      }
+
+      // Parse and clean tags array
+      const rowTags = parseArray(row.tags);
+
+      // Duplicate detection within the CSV
+      const normTitleBrand = `${title.toLowerCase()}|${brandInput.toLowerCase()}`;
+      if (title && brandInput) {
+        if (seenTitleBrands.has(normTitleBrand)) {
+          rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: title | Value: "${title}" | Reason: Duplicate row! Product with Name "${title}" and Brand "${brandInput}" already exists in Row ${seenTitleBrands.get(normTitleBrand)! + 2} of this CSV.`);
+        } else {
+          seenTitleBrands.set(normTitleBrand, i);
+        }
+      }
+
+      if (sku) {
+        const normSku = sku.toLowerCase();
+        if (seenSKUs.has(normSku)) {
+          rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: sku | Value: "${sku}" | Reason: Duplicate SKU! SKU "${sku}" is already declared in Row ${seenSKUs.get(normSku)! + 2} of this CSV.`);
+        } else {
+          seenSKUs.set(normSku, i);
+        }
+      }
+
+      const generatedSlug = slugify(title);
+      if (title) {
+        const normSlug = generatedSlug.toLowerCase();
+        if (seenSlugs.has(normSlug)) {
+          rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: slug | Value: "${generatedSlug}" | Reason: Duplicate slug generated! Another product generates the same slug "${generatedSlug}" in Row ${seenSlugs.get(normSlug)! + 2}.`);
+        } else {
+          seenSlugs.set(normSlug, i);
+        }
+      }
+
+      // Duplicate checks against database
+      const existingDbProduct = dbTitleBrandMap.get(normTitleBrand);
+
+      if (sku) {
+        const dbProductWithSku = dbSkuMap.get(sku.toLowerCase());
+        if (dbProductWithSku) {
+          if (!existingDbProduct || String(existingDbProduct._id) !== String(dbProductWithSku._id)) {
+            rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: sku | Value: "${sku}" | Reason: SKU "${sku}" is already in use by another product "${dbProductWithSku.title}".`);
+          }
+        }
+      }
+
+      if (title) {
+        const dbProductWithSlug = dbSlugMap.get(generatedSlug.toLowerCase());
+        if (dbProductWithSlug) {
+          if (!existingDbProduct || String(existingDbProduct._id) !== String(dbProductWithSlug._id)) {
+            rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: slug | Value: "${generatedSlug}" | Reason: Auto-generated Slug "${generatedSlug}" matches an existing product "${dbProductWithSlug.title}".`);
+          }
+        }
+      }
+
+      // Parse optional fields safely without throwing errors
+      const highlights = parseArray(row.highlights, ';');
+
+      const validUrlImages: string[] = [];
+      if (row.images) {
+        const rawUrls = parseArray(row.images);
+        for (const url of rawUrls) {
+          if (this.isValidUrl(url)) {
+            validUrlImages.push(url);
+          } else {
+            rowWarnings.push(`Invalid image URL skipped: "${url}"`);
+          }
+        }
+      }
+
+      const zipImages = imageMap.get(title.toLowerCase().trim()) || [];
+      const mergedImages = [...zipImages, ...validUrlImages];
+
+      if (zipImages.length > 0) {
+        result.summary.matchedImages += zipImages.length;
+      }
+
+      const parsedFaqs = parseJson(row.faqs, []);
+      const parsedSpecs = parseJson(row.specs, []);
+
+      const productData = {
+        title,
+        brand: matchedBrandName,
+        category: categorySlug,
+        price: Math.round(price),
+        mrp: Math.round(mrp),
+        stock: Math.round(stock),
+        description: parseString(row.description),
+        shortDescription: parseString(row.shortDescription),
+        sku,
+        hsnCode,
+        images: mergedImages,
+        highlights,
+        tags: rowTags,
+        faqs: parsedFaqs,
+        specs: parsedSpecs,
+        weightPerUnit,
+        weightUnit: weightUnitInput || 'kg',
+        discountPercent: row.discountPercent != null ? parseNumber(row.discountPercent) : undefined,
+        gstPercent: row.gstPercent != null ? parseNumber(row.gstPercent) : undefined,
+        status: parseString(row.status) || 'published',
+        isActive: row.isActive != null ? parseBoolean(row.isActive) : true,
+        deliveryDays: row.deliveryDays ? Math.round(parseNumber(row.deliveryDays)) : 2,
+        returnDays: row.returnDays ? Math.round(parseNumber(row.returnDays)) : 7,
+        isPpdOriginal: parseBoolean(row.isPpdOriginal),
+        isFreeDelivery: parseBoolean(row.isFreeDelivery),
+        // New metadata fields
+        barcode,
+        manufacturer,
+        publisher,
+        video,
+        metaTitle,
+        metaDescription,
       };
 
-      try {
-        // Validate required fields
-        if (!row.title?.trim()) {
-          throw new Error('Title is required');
-        }
-        if (!row.brand?.trim()) {
-          throw new Error('Brand is required');
-        }
-        if (!row.category?.trim()) {
-          throw new Error('Category is required');
-        }
-        if (row.price == null || row.price < 0) {
-          throw new Error('Price must be a positive number');
-        }
-        if (row.mrp == null || row.mrp < 0) {
-          throw new Error('MRP must be a positive number');
-        }
-        if (row.price > row.mrp) {
-          throw new Error('Price cannot be greater than MRP');
-        }
-        if (row.stock == null || row.stock < 0) {
-          throw new Error('Stock must be a non-negative number');
-        }
+      parsedRows.push(productData);
+      validationStates.push({ errors: rowErrors, warnings: rowWarnings });
+    }
 
-        // Normalize category
-        const categorySlug = row.category.toLowerCase().trim().replace(/\s+/g, '-');
-        if (!categoryMap.has(categorySlug)) {
-          throw new Error(`Category "${row.category}" not found in system`);
-        }
+    // Pass 2: Write valid rows to DB (or skip if dryRun)
+    for (let i = 0; i < parsedRows.length; i++) {
+      const productData = parsedRows[i];
+      const validation = validationStates[i];
+      const originalRow = rows[i];
 
-        // Create or fetch brand
-        const brandName = row.brand.trim();
-        if (!brandSet.has(brandName)) {
-          await this.brandModel.create({ name: brandName });
-          brandSet.add(brandName);
-        }
+      const productRecord: BulkImportResult['products'][0] = {
+        title: productData.title || originalRow.title || 'Unknown',
+        brand: productData.brand || originalRow.brand || 'Unknown',
+        status: 'failed',
+        images: productData.images ? productData.images.length : 0,
+        errors: validation.errors,
+        warnings: validation.warnings,
+      };
 
-        // Parse array fields
-        const highlights = row.highlights
-          ? row.highlights.split(';').map((s) => s.trim()).filter(Boolean)
-          : [];
-        const tags = row.tags
-          ? row.tags.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-          : [];
-
-        // Get images from ZIP (match by product name)
-        const images = imageMap.get(row.title.trim()) || [];
-        if (images.length > 0) {
-          result.summary.matchedImages += images.length;
-        } else if (imageMap.size > 0) {
-          // Warn if ZIP was provided but no images found for this product
-          result.warnings.push(`No images found for product "${row.title}" in ZIP file`);
-        }
-
-        const productData = {
-          title: row.title.trim(),
-          brand: brandName,
-          category: categorySlug,
-          price: Math.round(Number(row.price)),
-          mrp: Math.round(Number(row.mrp)),
-          stock: Math.round(Number(row.stock)),
-          description: row.description?.trim() ?? '',
-          shortDescription: row.shortDescription?.trim() ?? '',
-          sku: row.sku?.trim() ?? '',
-          hsnCode: row.hsnCode?.trim() ?? '',
-          images,
-          highlights,
-          tags: tags as any,
-          faqs: this.parseJsonField(row.faqs) as any,
-          specs: this.parseJsonField(row.specs) as any,
-          weightPerUnit: row.weightPerUnit != null ? Number(row.weightPerUnit) : undefined,
-          weightUnit: row.weightUnit as 'kg' | 'g' ?? 'kg',
-          discountPercent: row.discountPercent != null ? Number(row.discountPercent) : undefined,
-          gstPercent: row.gstPercent != null ? Number(row.gstPercent) : undefined,
-          status: (row.status as any) ?? 'published',
-          isActive: row.isActive ?? true,
-          deliveryDays: row.deliveryDays ? Math.round(Number(row.deliveryDays)) : 2,
-          returnDays: row.returnDays ? Math.round(Number(row.returnDays)) : 7,
-          isPpdOriginal: row.isPpdOriginal ?? false,
-          isFreeDelivery: row.isFreeDelivery ?? false,
-        };
-
-        // Try to find existing product by title+brand
-        const existing = await this.productModel
-          .findOne({ title: productData.title, brand: productData.brand })
-          .exec();
-
-        if (existing) {
-          await this.productModel.findByIdAndUpdate(existing._id, productData).exec();
-          productRecord.status = 'updated';
-          result.summary.successCount++;
-        } else {
-          await this.productsService.adminCreate(productData as any);
-          productRecord.status = 'created';
-          result.summary.successCount++;
-        }
-
-        productRecord.images = images.length;
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        productRecord.errors = [errorMsg];
+      if (validation.errors.length > 0) {
         productRecord.status = 'failed';
         result.summary.failedCount++;
-        this.logger.warn(
-          `Product ${row.title} (${row.brand}) - Row ${i + 2}: ${errorMsg}`,
-        );
+        result.summary.invalidCount++;
+      } else {
+        try {
+          if (dryRun) {
+            const normTitleBrand = `${productData.title.toLowerCase()}|${productData.brand.toLowerCase()}`;
+            const existing = dbTitleBrandMap.get(normTitleBrand);
+            productRecord.status = existing ? 'updated' : 'created';
+            result.summary.successCount++;
+          } else {
+            // Auto-create Brand if missing
+            if (productData.brand) {
+              const brandLower = productData.brand.toLowerCase();
+              if (!brandMap.has(brandLower)) {
+                const newBrand = await this.brandModel.create({ name: productData.brand });
+                brandMap.set(brandLower, newBrand);
+              }
+            }
+
+            const normTitleBrand = `${productData.title.toLowerCase()}|${productData.brand.toLowerCase()}`;
+            const existing = dbTitleBrandMap.get(normTitleBrand);
+
+            if (existing) {
+              await this.productModel.findByIdAndUpdate(existing._id, productData).exec();
+              productRecord.status = 'updated';
+              result.summary.successCount++;
+            } else {
+              await this.productsService.adminCreate(productData as any);
+              productRecord.status = 'created';
+              result.summary.successCount++;
+            }
+          }
+        } catch (error) {
+          const dbError = error instanceof Error ? error.message : 'Database save failed';
+          productRecord.errors = [`Row: ${i + 2} | Database write failed: ${dbError}`];
+          productRecord.status = 'failed';
+          result.summary.failedCount++;
+        }
       }
 
       result.products.push(productRecord);
     }
 
-    // Determine overall status
     if (result.summary.failedCount === 0) {
       result.status = 'success';
     } else if (result.summary.failedCount < rows.length) {
@@ -303,18 +512,19 @@ export class BulkImportService {
       result.status = 'failed';
     }
 
+    result.timeTakenMs = Date.now() - startTime;
+
     this.logger.log(
-      `Import complete: ${result.summary.successCount} success, ${result.summary.failedCount} failed, ` +
-        `${result.summary.matchedImages}/${result.summary.totalImages} images matched`,
+      `Import complete: ${result.summary.successCount} success, ${result.summary.failedCount} failed in ${result.timeTakenMs}ms`,
     );
 
     return result;
   }
 
   /**
-   * Generate CSV template for bulk import
+   * Generate CSV template for bulk import with all supported headers
    */
-  generateCsvTemplate(): string {
+  async generateCsvTemplate(): Promise<string> {
     const headers = [
       'title',
       'brand',
@@ -328,8 +538,8 @@ export class BulkImportService {
       'hsnCode',
       'tags',
       'highlights',
-      'faqs', // JSON string
-      'specs', // JSON string
+      'faqs',
+      'specs',
       'weightPerUnit',
       'weightUnit',
       'discountPercent',
@@ -340,10 +550,61 @@ export class BulkImportService {
       'returnDays',
       'isPpdOriginal',
       'isFreeDelivery',
+      'images',
+      'barcode',
+      'manufacturer',
+      'publisher',
+      'video',
+      'metaTitle',
+      'metaDescription',
     ];
 
-    const exampleRows = [
-      [
+    const recentProducts = await this.productModel
+      .find()
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .exec();
+
+    const exampleRows: any[][] = [];
+
+    if (recentProducts && recentProducts.length > 0) {
+      for (const p of recentProducts) {
+        exampleRows.push([
+          p.title || '',
+          p.brand || '',
+          p.category || '',
+          p.price != null ? p.price.toString() : '',
+          p.mrp != null ? p.mrp.toString() : '',
+          p.stock != null ? p.stock.toString() : '',
+          p.description || '',
+          p.shortDescription || '',
+          p.sku || '',
+          p.hsnCode || '',
+          p.tags ? p.tags.join(',') : '',
+          p.highlights ? p.highlights.join(';') : '',
+          p.faqs ? JSON.stringify(p.faqs) : '[]',
+          p.specs ? JSON.stringify(p.specs) : '[]',
+          p.weightPerUnit != null ? p.weightPerUnit.toString() : '',
+          p.weightUnit || 'kg',
+          p.discountPercent != null ? p.discountPercent.toString() : '',
+          p.gstPercent != null ? p.gstPercent.toString() : '',
+          p.status || 'published',
+          p.isActive !== undefined ? p.isActive.toString() : 'true',
+          p.deliveryDays != null ? p.deliveryDays.toString() : '2',
+          p.returnDays != null ? p.returnDays.toString() : '7',
+          p.isPpdOriginal !== undefined ? p.isPpdOriginal.toString() : 'false',
+          p.isFreeDelivery !== undefined ? p.isFreeDelivery.toString() : 'false',
+          p.images ? p.images.join(',') : '',
+          p.barcode || '',
+          p.manufacturer || '',
+          p.publisher || '',
+          p.video || '',
+          p.metaTitle || '',
+          p.metaDescription || '',
+        ]);
+      }
+    } else {
+      exampleRows.push([
         'Steel Sipper Water Bottle 750ml',
         'Classmate',
         'home-kitchen',
@@ -368,34 +629,15 @@ export class BulkImportService {
         '7',
         'true',
         'false',
-      ],
-      [
-        'A5 Premium Notebook',
-        'Classmate',
-        'stationery',
-        '89',
-        '120',
-        '100',
-        'High quality notebook with 200 pages',
-        'Compact, A5 size',
-        'NOTEBOOK456',
-        '9984',
-        'new,featured',
-        'Smooth paper;Hard bound;Great for writing',
-        '[{"question":"Pages?","answer":"200"}]',
-        '[{"label":"Size","value":"A5"}]',
-        '0.15',
-        'kg',
-        '0',
-        '5',
-        'draft',
-        'false',
-        '2',
-        '7',
-        'false',
-        'true',
-      ],
-    ];
+        'https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=500&q=60',
+        '8901234567890',
+        'Global Manufacturer',
+        'Classmate Publishing',
+        'https://www.youtube.com/watch?v=xyz',
+        'Premium Steel Water Bottle',
+        'Buy steel sipper water bottle at best price.',
+      ]);
+    }
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([headers, ...exampleRows]);
@@ -403,10 +645,6 @@ export class BulkImportService {
 
     return XLSX.write(wb, { bookType: 'csv', type: 'string' });
   }
-
-  /**
-   * Private helpers
-   */
 
   private isImageFile(filename: string): boolean {
     const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
@@ -427,31 +665,12 @@ export class BulkImportService {
   }
 
   private extractProductNameFromFilename(filename: string): string | null {
-    // Remove extension
     let name = filename.split('.')[0];
-
-    // Handle numbered images: "ProductName_1", "ProductName_2", etc.
-    // Or: "ProductName1", "ProductName2"
     name = name.replace(/_\d+$/, '').replace(/\d+$/, '');
-
     return name.trim() || null;
-  }
-
-  /**
-   * Safely parse a JSON field from CSV. Returns undefined if parsing fails.
-   */
-  private parseJsonField(value?: string): unknown {
-    if (!value) return undefined;
-    try {
-      return JSON.parse(value);
-    } catch {
-      this.logger.warn(`Failed to parse JSON field: ${value}`);
-      return undefined;
-    }
   }
 
   private generateJobId(): string {
     return `import-${Date.now()}-${Math.random().toString(36).substring(7)}`;
   }
-
 }

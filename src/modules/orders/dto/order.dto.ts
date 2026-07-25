@@ -21,9 +21,10 @@ export class OrderItemInputDto {
   @IsString()
   productId: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
-  batchId: string;
+  batchId?: string;
 
   @ApiProperty({ minimum: 1, description: 'Number of batches (batchCount)' })
   @Type(() => Number)

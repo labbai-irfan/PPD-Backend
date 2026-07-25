@@ -268,6 +268,16 @@ export class ProductsService {
     if (unitPrice < 0) throw new BadRequestException('Unit price cannot be negative');
     if (stockQuantity < 0) throw new BadRequestException('Stock quantity cannot be negative');
 
+    if (data.sku) {
+      const trimmedSku = data.sku.trim();
+      if (trimmedSku) {
+        const existingSku = await this.productModel.findOne({ sku: trimmedSku }).exec();
+        if (existingSku) {
+          throw new BadRequestException(`Product SKU "${trimmedSku}" already exists`);
+        }
+      }
+    }
+
     const processedBatches = this.processBatches(data.batches, unitPrice);
 
     const product = await this.productModel.create({
@@ -309,6 +319,16 @@ export class ProductsService {
 
     if (unitPrice < 0) throw new BadRequestException('Unit price cannot be negative');
     if (stockQuantity < 0) throw new BadRequestException('Stock quantity cannot be negative');
+
+    if (patch.sku) {
+      const trimmedSku = patch.sku.trim();
+      if (trimmedSku && trimmedSku !== product.sku) {
+        const existingSku = await this.productModel.findOne({ sku: trimmedSku }).exec();
+        if (existingSku) {
+          throw new BadRequestException(`Product SKU "${trimmedSku}" already exists`);
+        }
+      }
+    }
 
     let processedBatches = patch.batches !== undefined ? this.processBatches(patch.batches, unitPrice) : undefined;
     if (processedBatches === undefined && unitPrice !== oldUnitPrice) {
