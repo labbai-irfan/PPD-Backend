@@ -177,8 +177,8 @@ export class Product {
   @Prop()
   weightPerUnit?: number;
 
-  @Prop({ type: String, enum: ['kg', 'g', 'mg', 'ml', 'l', 'pcs', 'pack', 'box', 'set'], default: 'kg' })
-  weightUnit: 'kg' | 'g' | 'mg' | 'ml' | 'l' | 'pcs' | 'pack' | 'box' | 'set';
+  @Prop({ type: String, default: 'kg' })
+  weightUnit: string;
 
   /** Admin pricing-calculator inputs, kept so re-editing shows the same numbers back. */
   @Prop({ min: 0, max: 100 })

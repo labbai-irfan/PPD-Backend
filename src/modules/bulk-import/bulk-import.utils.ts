@@ -136,3 +136,79 @@ export function normalizeWeightUnit(val: any): string {
       return str; // Return as-is for validation
   }
 }
+
+/**
+ * Safely parse specifications from a semicolon and colon separated string.
+ * Example: "Capacity: 750ml; Material: Stainless Steel"
+ * Returns fallback to JSON array if valid JSON.
+ */
+export function parseSpecsString(val: any): Array<{ label: string; value: string }> {
+  if (val == null) return [];
+  const str = String(val).trim();
+  if (!str) return [];
+
+  // Fallback to JSON array parser
+  if (str.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(str);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item: any) => ({
+          label: parseString(item.label || item.name || ''),
+          value: parseString(item.value || ''),
+        })).filter(item => item.label && item.value);
+      }
+    } catch {}
+  }
+
+  const items = str.split(';').map((item) => item.trim()).filter(Boolean);
+  const specs: Array<{ label: string; value: string }> = [];
+  for (const item of items) {
+    const colonIdx = item.indexOf(':');
+    if (colonIdx !== -1) {
+      const label = item.substring(0, colonIdx).trim();
+      const value = item.substring(colonIdx + 1).trim();
+      if (label && value) {
+        specs.push({ label, value });
+      }
+    }
+  }
+  return specs;
+}
+
+/**
+ * Safely parse FAQs from a semicolon and colon/pipe separated string.
+ * Example: "Is it leakproof?: Yes; Is it hot/cold?: Yes"
+ * Returns fallback to JSON array if valid JSON.
+ */
+export function parseFaqsString(val: any): Array<{ question: string; answer: string }> {
+  if (val == null) return [];
+  const str = String(val).trim();
+  if (!str) return [];
+
+  // Fallback to JSON array parser
+  if (str.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(str);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item: any) => ({
+          question: parseString(item.question || ''),
+          answer: parseString(item.answer || ''),
+        })).filter(item => item.question && item.answer);
+      }
+    } catch {}
+  }
+
+  const items = str.split(';').map((item) => item.trim()).filter(Boolean);
+  const faqs: Array<{ question: string; answer: string }> = [];
+  for (const item of items) {
+    const separatorIdx = item.includes('|') ? item.indexOf('|') : item.indexOf(':');
+    if (separatorIdx !== -1) {
+      const question = item.substring(0, separatorIdx).trim();
+      const answer = item.substring(separatorIdx + 1).trim();
+      if (question && answer) {
+        faqs.push({ question, answer });
+      }
+    }
+  }
+  return faqs;
+}

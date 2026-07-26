@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { Product, ProductDocument, InventoryLog, ProductBatch } from './schemas/product.schema';
 import { Order, OrderDocument } from '../orders/schemas/order.schema';
+import { Wishlist, WishlistDocument } from '../wishlist/wishlist.module';
 import { ProductQueryDto, SortOption } from './dto/product-query.dto';
 import { CreateProductDto, UpdateProductDto, BatchDto } from './dto/admin-product.dto';
 import { Paginated, paginate } from '../../common/dto/pagination-query.dto';
@@ -17,6 +18,7 @@ export class ProductsService {
     @InjectModel(Product.name) private readonly productModel: Model<ProductDocument>,
     @InjectModel(InventoryLog.name) private readonly inventoryLogModel: Model<InventoryLog>,
     @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
+    @InjectModel(Wishlist.name) private readonly wishlistModel: Model<WishlistDocument>,
   ) {}
 
   async list(query: ProductQueryDto): Promise<Paginated<unknown>> {
@@ -102,7 +104,7 @@ export class ProductsService {
     }
   }
 
-  async getByIdOrSlug(idOrSlug: string): Promise<ProductDocument> {
+  async getByIdOrSlug(idOrSlug: string): Promise<any> {
     let product: ProductDocument | null = null;
     if (Types.ObjectId.isValid(idOrSlug)) {
       product = await this.productModel.findOne({ _id: idOrSlug, isActive: true }).exec();
@@ -111,7 +113,15 @@ export class ProductsService {
       product = await this.productModel.findOne({ slug: idOrSlug, isActive: true }).exec();
     }
     if (!product) throw new NotFoundException('Product not found');
-    return product;
+
+    const wishlistCount = await this.wishlistModel.countDocuments({
+      productIds: product._id.toString(),
+    }).exec();
+
+    return {
+      ...product.toObject(),
+      wishlistCount,
+    };
   }
 
   async getRelated(idOrSlug: string, limit = 8): Promise<ProductDocument[]> {

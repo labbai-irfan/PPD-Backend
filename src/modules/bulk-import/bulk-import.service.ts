@@ -15,6 +15,8 @@ import {
   parseArray,
   parseJson,
   normalizeWeightUnit,
+  parseSpecsString,
+  parseFaqsString,
 } from './bulk-import.utils';
 
 export interface ProductRow {
@@ -26,29 +28,18 @@ export interface ProductRow {
   stock?: any;
   description?: any;
   shortDescription?: any;
-  sku?: any;
+  isbn?: any;
   hsnCode?: any;
-  tags?: any;
-  highlights?: any;
-  faqs?: any;
-  specs?: any;
-  weightPerUnit?: any;
-  weightUnit?: any;
   discountPercent?: any;
   gstPercent?: any;
-  status?: any;
-  isActive?: any;
-  deliveryDays?: any;
-  returnDays?: any;
+  weightPerUnit?: any;
+  weightUnit?: any;
+  isFeatured?: any;
   isPpdOriginal?: any;
   isFreeDelivery?: any;
-  images?: any;
-  barcode?: any;
-  manufacturer?: any;
-  publisher?: any;
-  video?: any;
-  metaTitle?: any;
-  metaDescription?: any;
+  freeDeliveryThreshold?: any;
+  faqs?: any;
+  specs?: any;
 }
 
 export interface BulkImportResult {
@@ -76,7 +67,22 @@ export interface BulkImportResult {
   warnings: string[];
 }
 
-const ALLOWED_WEIGHT_UNITS = ['kg', 'g', 'mg', 'ml', 'l', 'pcs', 'pack', 'box', 'set'];
+const ALLOWED_WEIGHT_UNITS = [
+  // Weight
+  'kg', 'g', 'mg', 'lb', 'oz', 'ton',
+  // Volume
+  'l', 'ml', 'cl', 'fl oz', 'gal',
+  // Length
+  'mm', 'cm', 'm', 'km', 'in', 'ft', 'yd',
+  // Area
+  'sq ft', 'sq m', 'acre',
+  // Quantity / Count
+  'pcs', 'pc', 'unit', 'pair', 'set', 'pack', 'box', 'carton', 'bundle', 'roll', 'sheet', 'bottle', 'jar', 'can', 'tube', 'sachet', 'pouch', 'bag', 'strip', 'blister', 'capsule', 'tablet', 'vial', 'ampoule', 'stick', 'packet', 'dozen', 'ream', 'coil', 'crate', 'pallet',
+  // Time / Subscription
+  'day', 'week', 'month', 'year',
+  // Digital Products
+  'license', 'download', 'seat'
+];
 
 @Injectable()
 export class BulkImportService {
@@ -212,7 +218,7 @@ export class BulkImportService {
     }
 
     // Pre-query SKU/Slug/Title for checking duplicates
-    const skusToCheck = rows.map(r => parseString(r.sku)).filter(Boolean);
+    const skusToCheck = rows.map(r => parseString(r.isbn)).filter(Boolean);
     const titlesToCheck = rows.map(r => parseString(r.title)).filter(Boolean);
     const slugsToCheck = titlesToCheck.map(t => slugify(t));
 
@@ -237,7 +243,7 @@ export class BulkImportService {
     }
 
     // Checking duplicates within the CSV file itself
-    const seenSKUs = new Map<string, number>();
+    const seenISBNs = new Map<string, number>();
     const seenSlugs = new Map<string, number>();
     const seenTitleBrands = new Map<string, number>();
 
@@ -258,18 +264,16 @@ export class BulkImportService {
       const price = parseNumber(row.price);
       const mrp = parseNumber(row.mrp);
       const stock = parseNumber(row.stock);
-      const sku = parseString(row.sku);
+      const isbn = parseString(row.isbn);
       const hsnCode = parseString(row.hsnCode);
       const weightPerUnit = row.weightPerUnit != null ? parseNumber(row.weightPerUnit) : undefined;
       const weightUnitInput = normalizeWeightUnit(row.weightUnit || 'kg');
 
-      // Metadata optional fields
-      const barcode = parseString(row.barcode);
-      const manufacturer = parseString(row.manufacturer);
-      const publisher = parseString(row.publisher);
-      const video = parseString(row.video);
-      const metaTitle = parseString(row.metaTitle);
-      const metaDescription = parseString(row.metaDescription);
+      // Toggles
+      const isFeatured = parseBoolean(row.isFeatured);
+      const isPpdOriginal = parseBoolean(row.isPpdOriginal);
+      const isFreeDelivery = parseBoolean(row.isFreeDelivery);
+      const freeDeliveryThreshold = row.freeDeliveryThreshold != null ? parseNumber(row.freeDeliveryThreshold) : undefined;
 
       // Validate required fields
       if (!title) {
@@ -327,9 +331,6 @@ export class BulkImportService {
         }
       }
 
-      // Parse and clean tags array
-      const rowTags = parseArray(row.tags);
-
       // Duplicate detection within the CSV
       const normTitleBrand = `${title.toLowerCase()}|${brandInput.toLowerCase()}`;
       if (title && brandInput) {
@@ -340,12 +341,12 @@ export class BulkImportService {
         }
       }
 
-      if (sku) {
-        const normSku = sku.toLowerCase();
-        if (seenSKUs.has(normSku)) {
-          rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: sku | Value: "${sku}" | Reason: Duplicate SKU! SKU "${sku}" is already declared in Row ${seenSKUs.get(normSku)! + 2} of this CSV.`);
+      if (isbn) {
+        const normIsbn = isbn.toLowerCase();
+        if (seenISBNs.has(normIsbn)) {
+          rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: isbn | Value: "${isbn}" | Reason: Duplicate ISBN! ISBN "${isbn}" is already declared in Row ${seenISBNs.get(normIsbn)! + 2} of this CSV.`);
         } else {
-          seenSKUs.set(normSku, i);
+          seenISBNs.set(normIsbn, i);
         }
       }
 
@@ -362,11 +363,11 @@ export class BulkImportService {
       // Duplicate checks against database
       const existingDbProduct = dbTitleBrandMap.get(normTitleBrand);
 
-      if (sku) {
-        const dbProductWithSku = dbSkuMap.get(sku.toLowerCase());
+      if (isbn) {
+        const dbProductWithSku = dbSkuMap.get(isbn.toLowerCase());
         if (dbProductWithSku) {
           if (!existingDbProduct || String(existingDbProduct._id) !== String(dbProductWithSku._id)) {
-            rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: sku | Value: "${sku}" | Reason: SKU "${sku}" is already in use by another product "${dbProductWithSku.title}".`);
+            rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: isbn | Value: "${isbn}" | Reason: ISBN "${isbn}" is already in use by another product "${dbProductWithSku.title}".`);
           }
         }
       }
@@ -379,31 +380,14 @@ export class BulkImportService {
           }
         }
       }
-
-      // Parse optional fields safely without throwing errors
-      const highlights = parseArray(row.highlights, ';');
-
-      const validUrlImages: string[] = [];
-      if (row.images) {
-        const rawUrls = parseArray(row.images);
-        for (const url of rawUrls) {
-          if (this.isValidUrl(url)) {
-            validUrlImages.push(url);
-          } else {
-            rowWarnings.push(`Invalid image URL skipped: "${url}"`);
-          }
-        }
-      }
-
       const zipImages = imageMap.get(title.toLowerCase().trim()) || [];
-      const mergedImages = [...zipImages, ...validUrlImages];
 
       if (zipImages.length > 0) {
         result.summary.matchedImages += zipImages.length;
       }
 
-      const parsedFaqs = parseJson(row.faqs, []);
-      const parsedSpecs = parseJson(row.specs, []);
+      const parsedFaqs = parseFaqsString(row.faqs);
+      const parsedSpecs = parseSpecsString(row.specs);
 
       const productData = {
         title,
@@ -414,30 +398,23 @@ export class BulkImportService {
         stock: Math.round(stock),
         description: parseString(row.description),
         shortDescription: parseString(row.shortDescription),
-        sku,
+        sku: isbn, // Maps CSV isbn to DB sku field
         hsnCode,
-        images: mergedImages,
-        highlights,
-        tags: rowTags,
+        images: zipImages,
+        tags: isFeatured ? ['featured'] : [],
         faqs: parsedFaqs,
         specs: parsedSpecs,
         weightPerUnit,
         weightUnit: weightUnitInput || 'kg',
         discountPercent: row.discountPercent != null ? parseNumber(row.discountPercent) : undefined,
         gstPercent: row.gstPercent != null ? parseNumber(row.gstPercent) : undefined,
-        status: parseString(row.status) || 'published',
-        isActive: row.isActive != null ? parseBoolean(row.isActive) : true,
-        deliveryDays: row.deliveryDays ? Math.round(parseNumber(row.deliveryDays)) : 2,
-        returnDays: row.returnDays ? Math.round(parseNumber(row.returnDays)) : 7,
-        isPpdOriginal: parseBoolean(row.isPpdOriginal),
-        isFreeDelivery: parseBoolean(row.isFreeDelivery),
-        // New metadata fields
-        barcode,
-        manufacturer,
-        publisher,
-        video,
-        metaTitle,
-        metaDescription,
+        status: 'published',
+        isActive: true,
+        deliveryDays: 2,
+        returnDays: 7,
+        isPpdOriginal,
+        isFreeDelivery,
+        freeDeliveryThreshold,
       };
 
       parsedRows.push(productData);
@@ -534,29 +511,18 @@ export class BulkImportService {
       'stock',
       'description',
       'shortDescription',
-      'sku',
+      'isbn',
       'hsnCode',
-      'tags',
-      'highlights',
-      'faqs',
-      'specs',
-      'weightPerUnit',
-      'weightUnit',
       'discountPercent',
       'gstPercent',
-      'status',
-      'isActive',
-      'deliveryDays',
-      'returnDays',
+      'weightPerUnit',
+      'weightUnit',
+      'isFeatured',
       'isPpdOriginal',
       'isFreeDelivery',
-      'images',
-      'barcode',
-      'manufacturer',
-      'publisher',
-      'video',
-      'metaTitle',
-      'metaDescription',
+      'freeDeliveryThreshold',
+      'faqs',
+      'specs',
     ];
 
     const recentProducts = await this.productModel
@@ -578,64 +544,42 @@ export class BulkImportService {
           p.stock != null ? p.stock.toString() : '',
           p.description || '',
           p.shortDescription || '',
-          p.sku || '',
+          p.sku || '', // sku field stores ISBN
           p.hsnCode || '',
-          p.tags ? p.tags.join(',') : '',
-          p.highlights ? p.highlights.join(';') : '',
-          p.faqs ? JSON.stringify(p.faqs) : '[]',
-          p.specs ? JSON.stringify(p.specs) : '[]',
-          p.weightPerUnit != null ? p.weightPerUnit.toString() : '',
-          p.weightUnit || 'kg',
           p.discountPercent != null ? p.discountPercent.toString() : '',
           p.gstPercent != null ? p.gstPercent.toString() : '',
-          p.status || 'published',
-          p.isActive !== undefined ? p.isActive.toString() : 'true',
-          p.deliveryDays != null ? p.deliveryDays.toString() : '2',
-          p.returnDays != null ? p.returnDays.toString() : '7',
+          p.weightPerUnit != null ? p.weightPerUnit.toString() : '',
+          p.weightUnit || 'kg',
+          p.tags ? p.tags.includes('featured').toString() : 'false',
           p.isPpdOriginal !== undefined ? p.isPpdOriginal.toString() : 'false',
           p.isFreeDelivery !== undefined ? p.isFreeDelivery.toString() : 'false',
-          p.images ? p.images.join(',') : '',
-          p.barcode || '',
-          p.manufacturer || '',
-          p.publisher || '',
-          p.video || '',
-          p.metaTitle || '',
-          p.metaDescription || '',
+          p.freeDeliveryThreshold != null ? p.freeDeliveryThreshold.toString() : '',
+          p.faqs ? p.faqs.map(f => `${f.question}: ${f.answer}`).join('; ') : '',
+          p.specs ? p.specs.map(s => `${s.label}: ${s.value}`).join('; ') : '',
         ]);
       }
     } else {
       exampleRows.push([
         'Steel Sipper Water Bottle 750ml',
-        'Classmate',
+        'Milton',
         'home-kitchen',
         '349',
         '499',
         '50',
         'Premium steel water bottle for school and office',
         'Compact, lightweight',
-        'BOTTLE123',
+        '9783161484100',
         '9983',
-        'deal,bestseller',
-        'Leak-proof;Durable stainless steel;Keeps drinks hot/cold',
-        '[{"question":"Warranty?","answer":"2 years"}]',
-        '[{"label":"Capacity","value":"750ml"}]',
-        '0.25',
-        'kg',
         '10',
         '5',
-        'published',
+        '0.25',
+        'kg',
         'true',
-        '2',
-        '7',
         'true',
         'false',
-        'https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=500&q=60',
-        '8901234567890',
-        'Global Manufacturer',
-        'Classmate Publishing',
-        'https://www.youtube.com/watch?v=xyz',
-        'Premium Steel Water Bottle',
-        'Buy steel sipper water bottle at best price.',
+        '',
+        'Warranty?: 2 years; Is it leakproof?: Yes',
+        'Capacity: 750ml; Material: Stainless Steel',
       ]);
     }
 
