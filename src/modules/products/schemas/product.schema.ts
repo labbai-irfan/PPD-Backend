@@ -273,4 +273,4 @@ ProductSchema.index({ category: 1, isActive: 1 });
 ProductSchema.index({ tags: 1 });
 ProductSchema.index({ price: 1 });
 ProductSchema.index({ title: 'text', brand: 'text', description: 'text' });
-ProductSchema.index({ sku: 1 }, { unique: true, sparse: true });
+ProductSchema.index({ sku: 1 }, { sparse: true });

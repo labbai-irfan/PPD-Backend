@@ -19,6 +19,7 @@ import { ProductsModule } from './modules/products/products.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { BrandsModule } from './modules/brands/brands.module';
 import { BannersModule } from './modules/banners/banners.module';
+import { ContactsModule } from './modules/contacts/contacts.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -65,6 +66,7 @@ import { LocationsModule } from './modules/locations/locations.module';
     CategoriesModule,
     BrandsModule,
     BannersModule,
+    ContactsModule,
     CouponsModule,
     OrdersModule,
     PaymentsModule,

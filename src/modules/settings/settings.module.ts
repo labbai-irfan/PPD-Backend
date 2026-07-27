@@ -5,6 +5,7 @@ import { HydratedDocument, Model } from 'mongoose';
 import { Type } from 'class-transformer';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 
 // ---------- Schema (singleton document) ----------
 
@@ -55,7 +56,7 @@ class UpdateSettingsDto {
   @ApiPropertyOptional() @IsOptional() @IsString() instagramUrl?: string;
 }
 
-// ---------- Controller ----------
+// ---------- Controllers ----------
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -81,9 +82,34 @@ export class SettingsController {
   }
 }
 
+@ApiTags('settings')
+@Controller('settings')
+export class SettingsPublicController {
+  constructor(@InjectModel(Settings.name) private readonly settingsModel: Model<SettingsDocument>) {}
+
+  @Public()
+  @Get()
+  @ApiOperation({ summary: 'Public site settings (SEO metadata, shipping constants)' })
+  async getPublic() {
+    const doc = await this.settingsModel.findOne().exec();
+    const settings = doc ?? (await this.settingsModel.create({}));
+    return {
+      siteName: settings.siteName,
+      currency: settings.currency,
+      freeShippingThreshold: settings.freeShippingThreshold,
+      shippingFee: settings.shippingFee,
+      seoTitle: settings.seoTitle,
+      seoDescription: settings.seoDescription,
+      seoKeywords: settings.seoKeywords,
+      facebookUrl: settings.facebookUrl,
+      instagramUrl: settings.instagramUrl,
+    };
+  }
+}
+
 @Module({
   imports: [MongooseModule.forFeature([{ name: Settings.name, schema: SettingsSchema }])],
-  controllers: [SettingsController],
+  controllers: [SettingsController, SettingsPublicController],
   exports: [MongooseModule],
 })
 export class SettingsModule {}

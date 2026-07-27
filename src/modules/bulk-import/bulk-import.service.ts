@@ -341,14 +341,7 @@ export class BulkImportService {
         }
       }
 
-      if (isbn) {
-        const normIsbn = isbn.toLowerCase();
-        if (seenISBNs.has(normIsbn)) {
-          rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: isbn | Value: "${isbn}" | Reason: Duplicate ISBN! ISBN "${isbn}" is already declared in Row ${seenISBNs.get(normIsbn)! + 2} of this CSV.`);
-        } else {
-          seenISBNs.set(normIsbn, i);
-        }
-      }
+
 
       const generatedSlug = slugify(title);
       if (title) {
@@ -363,14 +356,7 @@ export class BulkImportService {
       // Duplicate checks against database
       const existingDbProduct = dbTitleBrandMap.get(normTitleBrand);
 
-      if (isbn) {
-        const dbProductWithSku = dbSkuMap.get(isbn.toLowerCase());
-        if (dbProductWithSku) {
-          if (!existingDbProduct || String(existingDbProduct._id) !== String(dbProductWithSku._id)) {
-            rowErrors.push(`Row: ${rowNum} | Product: "${title}" | Field: isbn | Value: "${isbn}" | Reason: ISBN "${isbn}" is already in use by another product "${dbProductWithSku.title}".`);
-          }
-        }
-      }
+
 
       if (title) {
         const dbProductWithSlug = dbSlugMap.get(generatedSlug.toLowerCase());
