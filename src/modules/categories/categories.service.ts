@@ -24,6 +24,15 @@ export class CategoriesService {
 
     const countBySlug = new Map(counts.map((c) => [c._id, c.count]));
 
+    // Parents roll up their subcategories' products, matching what browsing the parent shows
+    const byId = new Map(categories.map((c) => [c._id.toString(), c]));
+    for (const cat of categories) {
+      const parent = cat.parentId && byId.get(cat.parentId.toString());
+      if (parent) {
+        countBySlug.set(parent.slug, (countBySlug.get(parent.slug) ?? 0) + (countBySlug.get(cat.slug) ?? 0));
+      }
+    }
+
     return categories.map((cat) => ({
       ...cat.toObject(),
       productCount: cat.slug === 'all' ? totalActive : (countBySlug.get(cat.slug) ?? 0),

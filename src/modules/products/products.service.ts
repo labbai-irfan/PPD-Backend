@@ -4,6 +4,7 @@ import { Model, PipelineStage, Types } from 'mongoose';
 import { Product, ProductDocument, InventoryLog, ProductBatch } from './schemas/product.schema';
 import { Order, OrderDocument } from '../orders/schemas/order.schema';
 import { Wishlist, WishlistDocument } from '../wishlist/wishlist.module';
+import { Category, CategoryDocument } from '../categories/schemas/category.schema';
 import { ProductQueryDto, SortOption } from './dto/product-query.dto';
 import { CreateProductDto, UpdateProductDto, BatchDto } from './dto/admin-product.dto';
 import { Paginated, paginate } from '../../common/dto/pagination-query.dto';
@@ -19,13 +20,30 @@ export class ProductsService {
     @InjectModel(InventoryLog.name) private readonly inventoryLogModel: Model<InventoryLog>,
     @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
     @InjectModel(Wishlist.name) private readonly wishlistModel: Model<WishlistDocument>,
+    @InjectModel(Category.name) private readonly categoryModel: Model<CategoryDocument>,
   ) {}
+
+  /**
+   * A category filter must also match its subcategories — products are filed on the
+   * leaf slug, so browsing the parent tab would otherwise come back empty.
+   * Hierarchy is one level deep (see Category.parentId).
+   */
+  private async categoryMatch(slug: string): Promise<unknown> {
+    const parent = await this.categoryModel.findOne({ slug }).select('_id').lean().exec();
+    if (!parent) return slug;
+    const children = await this.categoryModel
+      .find({ parentId: parent._id })
+      .select('slug')
+      .lean()
+      .exec();
+    return children.length ? { $in: [slug, ...children.map((c) => c.slug)] } : slug;
+  }
 
   async list(query: ProductQueryDto): Promise<Paginated<unknown>> {
     // Plain record: feeds an aggregation $match, which mongoose does not type-check
     const match: Record<string, unknown> = { isActive: true };
 
-    if (query.category && query.category !== 'all') match.category = query.category;
+    if (query.category && query.category !== 'all') match.category = await this.categoryMatch(query.category);
     if (query.tag === 'new') {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -165,7 +183,7 @@ export class ProductsService {
   }): Promise<Paginated<ProductDocument>> {
     const filter: Record<string, unknown> = {};
     if (query.status) filter.isActive = query.status === 'active';
-    if (query.category && query.category !== 'all') filter.category = query.category;
+    if (query.category && query.category !== 'all') filter.category = await this.categoryMatch(query.category);
     if (query.q) {
       const rx = new RegExp(escapeRegex(query.q), 'i');
       filter.$or = [{ title: rx }, { brand: rx }];
@@ -206,6 +224,15 @@ export class ProductsService {
       this.productModel.countDocuments({ createdAt: { $gte: startOfMonth } }),
     ]);
     return { total, addedThisMonth };
+  }
+
+  /**
+   * What the customer pays — the admin form's "Final Price (Calculated)".
+   * MRP is the struck-through list price; the discount is what makes them differ.
+   */
+  private sellingPrice(mrp: number, discountPercent = 0, gstPercent = 0): number {
+    const net = mrp * (1 - discountPercent / 100) * (1 + gstPercent / 100);
+    return Math.max(0, Math.round(net * 100) / 100);
   }
 
   private processBatches(batches: BatchDto[] | undefined, unitPrice: number): any[] | undefined {
@@ -283,7 +310,7 @@ export class ProductsService {
     const product = await this.productModel.create({
       ...data,
       slug,
-      price: unitPrice,
+      price: this.sellingPrice(data.mrp, data.discountPercent, data.gstPercent),
       unitPrice,
       stock: stockQuantity,
       stockQuantity,
@@ -369,8 +396,8 @@ export class ProductsService {
     }
 
     Object.assign(product, patch);
-    
-    product.price = unitPrice;
+
+    product.price = this.sellingPrice(product.mrp, product.discountPercent, product.gstPercent);
     product.unitPrice = unitPrice;
     product.stock = stockQuantity;
     product.stockQuantity = stockQuantity;

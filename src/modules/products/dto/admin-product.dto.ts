@@ -18,7 +18,7 @@ import { PRODUCT_TAGS } from '../schemas/product.schema';
 export class FaqDto {
   @ApiProperty()
   @IsString()
-  @MinLength(3)
+  @MinLength(1)
   question: string;
 
   @ApiProperty()
