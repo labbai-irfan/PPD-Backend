@@ -24,26 +24,41 @@ export class ProductsService {
   ) {}
 
   /**
-   * A category filter must also match its subcategories — products are filed on the
-   * leaf slug, so browsing the parent tab would otherwise come back empty.
-   * Hierarchy is one level deep (see Category.parentId).
+   * Builds the `category` match for one or more comma-separated slugs. Each selected
+   * slug also matches its subcategories — products are filed on the leaf slug, so
+   * browsing a parent tab would otherwise come back empty. Hierarchy is one level
+   * deep (see Category.parentId). Returns undefined when nothing is selected.
    */
-  private async categoryMatch(slug: string): Promise<unknown> {
-    const parent = await this.categoryModel.findOne({ slug }).select('_id').lean().exec();
-    if (!parent) return slug;
+  private async categoryMatch(slugs: string): Promise<unknown> {
+    const selected = slugs
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s && s !== 'all');
+    if (!selected.length) return undefined;
+
+    const parents = await this.categoryModel
+      .find({ slug: { $in: selected } })
+      .select('_id')
+      .lean()
+      .exec();
     const children = await this.categoryModel
-      .find({ parentId: parent._id })
+      .find({ parentId: { $in: parents.map((p) => p._id) } })
       .select('slug')
       .lean()
       .exec();
-    return children.length ? { $in: [slug, ...children.map((c) => c.slug)] } : slug;
+
+    const all = [...new Set([...selected, ...children.map((c) => c.slug)])];
+    return all.length === 1 ? all[0] : { $in: all };
   }
 
   async list(query: ProductQueryDto): Promise<Paginated<unknown>> {
     // Plain record: feeds an aggregation $match, which mongoose does not type-check
     const match: Record<string, unknown> = { isActive: true };
 
-    if (query.category && query.category !== 'all') match.category = await this.categoryMatch(query.category);
+    if (query.category) {
+      const categories = await this.categoryMatch(query.category);
+      if (categories !== undefined) match.category = categories;
+    }
     if (query.tag === 'new') {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -183,7 +198,10 @@ export class ProductsService {
   }): Promise<Paginated<ProductDocument>> {
     const filter: Record<string, unknown> = {};
     if (query.status) filter.isActive = query.status === 'active';
-    if (query.category && query.category !== 'all') filter.category = await this.categoryMatch(query.category);
+    if (query.category) {
+      const categories = await this.categoryMatch(query.category);
+      if (categories !== undefined) filter.category = categories;
+    }
     if (query.q) {
       const rx = new RegExp(escapeRegex(query.q), 'i');
       filter.$or = [{ title: rx }, { brand: rx }];
