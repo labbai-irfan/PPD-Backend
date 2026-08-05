@@ -22,6 +22,8 @@ import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { CouponsService } from '../coupons/coupons.service';
 import { MailService } from '../mail/mail.service';
+import { DeliveryChargesService } from '../delivery-charges/delivery-charges.module';
+import { resolveBatch } from '../../common/pricing/batch';
 import { ConfirmMockDto, CreateIntentDto, VerifyPaymentDto } from './dto/payment.dto';
 
 const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -88,6 +90,7 @@ export class PaymentsService {
     private readonly couponsService: CouponsService,
     private readonly config: ConfigService,
     private readonly mail: MailService,
+    private readonly deliveryChargesService: DeliveryChargesService,
   ) {}
 
   // ---------- Provider strategy ----------
@@ -159,12 +162,18 @@ export class PaymentsService {
       }
       const product = await this.productModel
         .findOne({ _id: item.productId, isActive: true })
-        .select('title price')
+        .select('title sku price mrp images batches')
         .exec();
       if (!product) {
         throw new BadRequestException('A product in your cart is no longer available');
       }
-      subtotal += product.price * item.quantity;
+      // Same resolution as OrdersService.place() — a different price here means
+      // the order gets rejected after the customer has already paid.
+      const batch = resolveBatch(product as never, item.batchId);
+      if (!batch) {
+        throw new BadRequestException(`The selected option is no longer available for "${product.title}"`);
+      }
+      subtotal += batch.sellingPrice * item.quantity;
     }
     subtotal = round2(subtotal);
 
@@ -174,9 +183,18 @@ export class PaymentsService {
       discount = result.discount;
     }
 
-    const threshold = this.config.get<number>('commerce.freeShippingThreshold') ?? 499;
-    const fee = this.config.get<number>('commerce.shippingFee') ?? 40;
-    const shipping = subtotal - discount >= threshold ? 0 : fee;
+    /*
+     * Must match OrdersService.place() exactly. It prices shipping from the
+     * destination, so charging a flat config fee here under-charges the customer
+     * and then the order is rejected for an amount mismatch — money taken, no order.
+     */
+    const shipping = await this.deliveryChargesService.calculate({
+      country: dto.address?.country ?? '',
+      state: dto.address?.state,
+      city: dto.address?.city,
+      pincode: dto.address?.pincode,
+      subtotal: subtotal - discount,
+    });
     return round2(subtotal - discount + shipping);
   }
 

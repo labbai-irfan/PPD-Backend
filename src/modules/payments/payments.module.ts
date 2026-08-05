@@ -7,6 +7,7 @@ import { Product, ProductSchema } from '../products/schemas/product.schema';
 import { CouponsModule } from '../coupons/coupons.module';
 import { UsersModule } from '../users/users.module';
 import { MailModule } from '../mail/mail.module';
+import { DeliveryChargesModule } from '../delivery-charges/delivery-charges.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { MailModule } from '../mail/mail.module';
     CouponsModule,
     forwardRef(() => UsersModule),
     MailModule,
+    DeliveryChargesModule,
   ],
   controllers: [PaymentsController],
   providers: [PaymentsService],

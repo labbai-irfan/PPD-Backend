@@ -12,6 +12,25 @@ import {
 import { OrderItemInputDto } from '../../orders/dto/order.dto';
 import { PAYMENT_INTENT_METHODS } from '../schemas/payment-intent.schema';
 
+/** Delivery location — shipping depends on it, so the charge must know it up front. */
+export class IntentDestinationDto {
+  @ApiProperty()
+  @IsString()
+  country: string;
+
+  @ApiProperty()
+  @IsString()
+  state: string;
+
+  @ApiProperty()
+  @IsString()
+  city: string;
+
+  @ApiProperty()
+  @Matches(/^\d{6}$/, { message: 'pincode must be 6 digits' })
+  pincode: string;
+}
+
 export class CreateIntentDto {
   @ApiProperty({ type: [OrderItemInputDto] })
   @IsArray()
@@ -24,6 +43,12 @@ export class CreateIntentDto {
   @IsOptional()
   @IsString()
   couponCode?: string;
+
+  @ApiPropertyOptional({ type: IntentDestinationDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => IntentDestinationDto)
+  address?: IntentDestinationDto;
 
   @ApiProperty({ enum: PAYMENT_INTENT_METHODS })
   @IsIn(PAYMENT_INTENT_METHODS)

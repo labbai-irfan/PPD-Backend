@@ -27,6 +27,7 @@ import { generateOrderNumber } from '../../common/utils';
 import { Paginated, paginate } from '../../common/dto/pagination-query.dto';
 import { AdminOrderQueryDto, PlaceOrderDto } from './dto/order.dto';
 import { DeliveryChargesService } from '../delivery-charges/delivery-charges.module';
+import { resolveBatch } from '../../common/pricing/batch';
 
 const TRACK_STEPS: { status: OrderStatus; label: string }[] = [
   { status: 'placed', label: 'Order Placed' },
@@ -74,17 +75,10 @@ export class OrdersService {
           throw new ConflictException(`Product "${product?.title ?? 'Unknown'}" is no longer available`);
         }
 
-        let batch: any = null;
-        if (item.batchId) {
-          batch = product.batches.find((b: any) => b._id.toString() === item.batchId);
-        } else {
-          // Fallback: Find default active batch, or first active batch
-          batch = product.batches.find((b: any) => b.isDefault && b.status === 'active') ||
-                  product.batches.find((b: any) => b.status === 'active');
-        }
-
+        // Products without batches sell as a single standard unit — see common/pricing/batch
+        const batch: any = resolveBatch(product as any, item.batchId);
         if (!batch) {
-          throw new BadRequestException(`No active batch found for product "${product.title}"`);
+          throw new BadRequestException(`The selected option is no longer available for "${product.title}"`);
         }
 
         if (batch.status !== 'active') {
