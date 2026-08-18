@@ -39,6 +39,7 @@ import { RecommendationsModule } from './modules/recommendations/recommendations
 import { PackagesModule } from './modules/packages/packages.module';
 import { DeliveryChargesModule } from './modules/delivery-charges/delivery-charges.module';
 import { LocationsModule } from './modules/locations/locations.module';
+import { SitemapModule } from './modules/sitemap/sitemap.module';
 
 @Module({
   imports: [
@@ -86,6 +87,7 @@ import { LocationsModule } from './modules/locations/locations.module';
     PackagesModule,
     DeliveryChargesModule,
     LocationsModule,
+    SitemapModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

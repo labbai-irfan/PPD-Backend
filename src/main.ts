@@ -40,7 +40,7 @@ async function bootstrap() {
   // rawBody: webhook signatures (Razorpay) are HMACs over the exact request bytes
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
-    logger: ['error', 'warn'],
+    logger: ['log', 'error', 'warn', 'debug', 'verbose'],
   });
   const config = app.get(ConfigService);
 
