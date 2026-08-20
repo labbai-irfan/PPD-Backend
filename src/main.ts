@@ -6,7 +6,6 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import * as express from 'express';
 import { join } from 'path';
-import rateLimit from 'express-rate-limit';
 import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
 
@@ -103,33 +102,7 @@ async function bootstrap() {
   // Sanitize data against NoSQL injection
   app.use(mongoSanitize());
 
-  // Rate limiting on auth endpoints (relaxed in development, skip for authenticated users)
-  const limiter = rateLimit({
-    windowMs: nodeEnv === 'development' ? 60 * 1000 : 15 * 60 * 1000, // 1 min in dev, 15 min in prod
-    max: nodeEnv === 'development' ? 1000 : 100, // 1000 req/min in dev, 100 in prod
-    message: 'Too many requests from this IP, please try again later.',
-    standardHeaders: false,
-    legacyHeaders: false,
-    skip: (req: any) => {
-      if (nodeEnv === 'development') return true
-      // Skip rate limiting for authenticated admin requests (JWT token present)
-      return !!req.headers.authorization?.startsWith('Bearer ')
-    },
-  });
-  app.use(limiter);
 
-  // Stricter rate limit for auth endpoints
-  const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5, // 5 attempts per 15 minutes
-    skipSuccessfulRequests: true,
-    message: 'Too many login attempts, please try again later.',
-    standardHeaders: false,
-    legacyHeaders: false,
-  });
-  app.use(`/${apiPrefix}/auth/login`, authLimiter);
-  app.use(`/${apiPrefix}/auth/admin-login`, authLimiter);
-  app.use(`/${apiPrefix}/auth/register`, authLimiter);
 
   // Uploaded images served statically (product photos, avatars) with CORS restrictions
   const uploadDir = config.get<string>('uploads.dir') ?? './uploads';

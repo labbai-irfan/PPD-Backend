@@ -35,7 +35,7 @@ class SitemapController {
     // timestamps: true adds updatedAt at runtime; the schema classes don't declare it
     type SlugRow = { slug: string; updatedAt?: Date };
     const [products, categories] = (await Promise.all([
-      this.productModel.find({ isActive: true }).select('slug updatedAt').lean().exec(),
+      this.productModel.find({ isActive: true, slug: { $ne: 'product' } }).select('slug updatedAt').lean().exec(),
       this.categoryModel.find({ isActive: true, slug: { $ne: 'all' } }).select('slug updatedAt').lean().exec(),
     ])) as [SlugRow[], SlugRow[]];
 

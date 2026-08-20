@@ -2,10 +2,11 @@ import { randomBytes, randomInt } from 'crypto';
 
 /** "Premium A5 Notebook" -> "premium-a5-notebook" */
 export function slugify(text: string): string {
+  if (!text) return '';
   return text
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
     .replace(/[\s_]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
